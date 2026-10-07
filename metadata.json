@@ -1,0 +1,6 @@
+{
+  "name": "SKYRA - Marine & Watersports Marketplace",
+  "description": "Modern e-commerce marketplace for surfing, swimming, diving, watersports, beachwear, and marine equipment with real-time inventory and wholesale pricing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
