@@ -40,7 +40,8 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
     shipping_method_id,
     payment_method,
     voucher_code,
-    notes
+    notes,
+    signature_option
   } = req.body;
 
   if (!recipient_name || !recipient_phone || !shipping_address || !shipping_city) {
@@ -122,15 +123,16 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
     // 3. Generate Order Number
     const orderNumber = `SKY-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 4. Create Order Record with exact incoming timestamp (Waktu Pesanan Masuk)
+    // 4. Create Order Record with exact incoming timestamp (Waktu Pesanan Masuk) & Signature Option
+    const initialSignatureStatus = signature_option === 'SIGN_LATER' ? 'SIGN_LATER' : 'PENDING';
     const orderInsert = db.prepare(`
       INSERT INTO orders (
         order_number, user_id, guest_email, recipient_name, recipient_phone,
         shipping_address, shipping_city, shipping_province, shipping_postal,
         shipping_method, shipping_cost, subtotal, wholesale_discount,
         voucher_code, voucher_discount, grand_total, payment_method,
-        payment_status, order_status, notes, incoming_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING_PAYMENT', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        payment_status, order_status, signature_status, notes, incoming_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING_PAYMENT', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).run(
       orderNumber,
       user?.id || null,
@@ -149,6 +151,7 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
       voucherDiscount,
       grandTotal,
       payment_method || 'QRIS',
+      initialSignatureStatus,
       notes || null
     );
 
@@ -205,6 +208,13 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
       INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
       VALUES (?, ?, 'PENDING_PAYMENT', 'PESANAN_MASUK', 'Pesanan Masuk ke Sistem', ?, CURRENT_TIMESTAMP, ?)
     `).run(orderId, orderNumber, `Pesanan #${orderNumber} dibuat oleh ${recipient_name} via ${payment_method || 'QRIS'} (Total: Rp ${grandTotal.toLocaleString('id-ID')})`, user?.name || recipient_name);
+
+    if (signature_option === 'SIGN_LATER') {
+      db.prepare(`
+        INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+        VALUES (?, ?, 'SIGN_LATER', 'TANDA_TANGAN', 'Tanda Tangan Ditunda (Sign Later)', 'Pelanggan memilih Sign Later saat checkout (tanda tangan penerimaan saat diserahkan oleh kurir).', CURRENT_TIMESTAMP, ?)
+      `).run(orderId, orderNumber, user?.name || recipient_name);
+    }
 
     db.prepare(`
       INSERT INTO notifications (user_id, role, title, message, type, link)
@@ -327,4 +337,39 @@ ordersRouter.post('/orders/:orderNumber/payment-proof', (req: Request, res: Resp
   broadcastRealtimeEvent({ type: 'PAYMENT_STATUS_CHANGED', data: { orderNumber, status: 'UNDER_REVIEW' } });
 
   res.json({ message: 'Bukti pembayaran berhasil diunggah dan sedang dalam verifikasi tim SKYRA!' });
+});
+
+// Digital Signature & Sign Later (Tanda Tangan Digital atau Tanda Tangani Nanti)
+ordersRouter.post('/orders/:orderNumber/signature', (req: Request, res: Response) => {
+  const { orderNumber } = req.params;
+  const { action, signatureData } = req.body; // 'SIGN_NOW' | 'SIGN_LATER'
+
+  const order = db.prepare('SELECT id FROM orders WHERE order_number = ?').get(orderNumber) as any;
+  if (!order) return res.status(404).json({ error: 'Pesanan tidak ditemukan' });
+
+  if (action === 'SIGN_LATER') {
+    db.prepare("UPDATE orders SET signature_status = 'SIGN_LATER', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.id);
+
+    db.prepare(`
+      INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+      VALUES (?, ?, 'SIGN_LATER', 'TANDA_TANGAN', 'Tanda Tangan Ditunda (Sign Later)', 'Pelanggan memilih menandatangani tanda terima nanti saat paket diserahkan oleh kurir.', CURRENT_TIMESTAMP, 'Pelanggan')
+    `).run(order.id, orderNumber);
+
+    broadcastRealtimeEvent({ type: 'ORDER_STATUS_CHANGED', data: { orderNumber, status: 'SIGN_LATER' } });
+    return res.json({ success: true, message: 'Status berhasil disetel ke Sign Later (Tanda Tangani Nanti saat serah terima kurir).' });
+  } else {
+    if (!signatureData) {
+      return res.status(400).json({ error: 'Data tanda tangan digital wajib diisi' });
+    }
+
+    db.prepare("UPDATE orders SET signature_status = 'SIGNED', customer_signature = ?, signed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(signatureData, order.id);
+
+    db.prepare(`
+      INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+      VALUES (?, ?, 'SIGNED', 'TANDA_TANGAN', 'Faktur & Penerimaan Ditandatangani Digital', 'Pelanggan telah membubuhkan tanda tangan digital secara resmi pada faktur pesanan.', CURRENT_TIMESTAMP, 'Pelanggan')
+    `).run(order.id, orderNumber);
+
+    broadcastRealtimeEvent({ type: 'ORDER_STATUS_CHANGED', data: { orderNumber, status: 'SIGNED' } });
+    return res.json({ success: true, message: 'Tanda tangan digital berhasil disimpan!' });
+  }
 });

@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Boxes, ShoppingCart, CreditCard, 
   Users, BarChart3, History, Plus, Search, Edit2, Trash2, 
   Check, X, AlertTriangle, ArrowUpDown, Download, Printer, Shield, Eye, Clock,
-  Truck, LogIn, LogOut, Timer, Calendar, UserCheck
+  Truck, LogIn, LogOut, Timer, Calendar, UserCheck, FileSignature
 } from 'lucide-react';
 import { useRealtime } from '../context/RealtimeContext.tsx';
 import { formatFullDateTime, formatShortDateTime, formatElapsedDuration } from '../utils/dateUtils.ts';

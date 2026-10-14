@@ -226,6 +226,9 @@ export interface Order {
   delivered_at?: string;
   cancelled_at?: string;
   updated_at?: string;
+  customer_signature?: string;
+  signature_status?: 'PENDING' | 'SIGNED' | 'SIGN_LATER';
+  signed_at?: string;
   items?: OrderItem[];
   payment?: any;
   paymentProof?: any;

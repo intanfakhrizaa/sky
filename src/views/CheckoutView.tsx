@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, Truck, CreditCard, QrCode, Tag, 
-  ArrowLeft, Check, AlertCircle, Loader2, Sparkles 
+  ArrowLeft, Check, AlertCircle, Loader2, Sparkles,
+  Clock, FileSignature
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useCart } from '../context/CartContext.tsx';
+import { formatFullDateTime } from '../utils/dateUtils.ts';
 
 interface CheckoutViewProps {
   onBack: () => void;
@@ -14,6 +16,16 @@ interface CheckoutViewProps {
 export function CheckoutView({ onBack, onOrderSuccess }: CheckoutViewProps) {
   const { user } = useAuth();
   const { summary, refreshCart } = useCart();
+
+  // Live transaction clock
+  const [liveTime, setLiveTime] = useState<string>(new Date().toISOString());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLiveTime(new Date().toISOString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Address fields
   const [recipientName, setRecipientName] = useState(user?.name || '');
@@ -36,6 +48,9 @@ export function CheckoutView({ onBack, onOrderSuccess }: CheckoutViewProps) {
   // Payment Method
   const [paymentMethod, setPaymentMethod] = useState('QRIS');
   const [notes, setNotes] = useState('');
+
+  // Signature Option: 'SIGN_LATER' | 'SIGN_NOW'
+  const [signatureOption, setSignatureOption] = useState<'SIGN_LATER' | 'SIGN_NOW'>('SIGN_LATER');
 
   // Submit status
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -114,6 +129,7 @@ export function CheckoutView({ onBack, onOrderSuccess }: CheckoutViewProps) {
           payment_method: paymentMethod,
           voucher_code: appliedVoucher?.code || null,
           notes,
+          signature_option: signatureOption,
         }),
       });
 
@@ -134,16 +150,22 @@ export function CheckoutView({ onBack, onOrderSuccess }: CheckoutViewProps) {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Checkout Pembelian</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Lengkapi alamat dan pilih metode pembayaran untuk mengamankan pesanan Anda
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Checkout Pembelian</h1>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-50 text-cyan-900 border border-cyan-200 rounded-full text-xs font-mono font-bold shadow-xs">
+              <Clock className="w-3.5 h-3.5 text-cyan-700 animate-pulse" />
+              <span>Waktu Transaksi: {formatFullDateTime(liveTime)}</span>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Lengkapi alamat dan pilih metode pembayaran untuk mengamankan pesanan Anda. Setiap transaksi tercatat jam masuk akurat.
           </p>
         </div>
         <button
           onClick={onBack}
-          className="text-xs font-bold text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+          className="text-xs font-bold text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 self-start sm:self-auto"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Kembali ke Keranjang</span>
@@ -351,6 +373,70 @@ export function CheckoutView({ onBack, onOrderSuccess }: CheckoutViewProps) {
                 </div>
                 <p className="text-[11px] text-slate-500">
                   Transfer ke rekening Bank Mandiri / BCA resmi SKYRA Marine lalu upload foto struk untuk diverifikasi.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Persetujuan Tanda Terima & Pilihan Sign Later */}
+          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl">
+                  <FileSignature className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">
+                    Penerimaan Faktur &amp; Tanda Tangan Dokumen
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Pilih opsi penandatanganan faktur bukti serah terima pesanan
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Opsi Sign Later */}
+              <div
+                onClick={() => setSignatureOption('SIGN_LATER')}
+                className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                  signatureOption === 'SIGN_LATER'
+                    ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-indigo-600" />
+                    Sign Later (Tanda Tangani Nanti)
+                  </span>
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-[10px] font-black rounded-full">
+                    Pilihan Utama
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Tanda tangani faktur fisik / digital nanti saat pesanan diserahkan langsung oleh kurir ke alamat Anda.
+                </p>
+              </div>
+
+              {/* Opsi Sign Now */}
+              <div
+                onClick={() => setSignatureOption('SIGN_NOW')}
+                className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                  signatureOption === 'SIGN_NOW'
+                    ? 'border-cyan-600 bg-cyan-50/70 ring-1 ring-cyan-600'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-cyan-600" />
+                    Tanda Tangan Digital Sekarang
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Konfirmasi tanda tangan digital penerimaan langsung saat pesanan dibuat dan tercatat ke sistem faktur.
                 </p>
               </div>
             </div>

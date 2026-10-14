@@ -147,7 +147,10 @@ function MainApp() {
             {currentView === 'profile' && <ProfileView onNavigate={handleNavigate} />}
 
             {currentView === 'login' && (
-              <LoginView onSuccess={() => setCurrentView('home')} />
+              <LoginView
+                onSuccess={() => setCurrentView('home')}
+                onSignLater={() => setCurrentView('home')}
+              />
             )}
           </main>
 

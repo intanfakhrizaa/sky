@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle2, Clock, AlertCircle, QrCode, CreditCard, 
   Upload, Printer, ArrowLeft, Truck, Package, ShieldCheck, Loader2,
-  LogIn, LogOut, Calendar, Timer, History, UserCheck
+  LogIn, LogOut, Calendar, Timer, History, UserCheck, FileSignature,
+  FileText, X, Check, PenTool, RotateCcw, Sparkles
 } from 'lucide-react';
 import { Order } from '../types/index.ts';
 import { useRealtime } from '../context/RealtimeContext.tsx';
@@ -26,6 +27,18 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 
+  // Digital Signature & Sign Later states
+  const [showSignModal, setShowSignModal] = useState(false);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [typedSignName, setTypedSignName] = useState('');
+  const [signMethod, setSignMethod] = useState<'draw' | 'type'>('type');
+  const [isSubmittingSign, setIsSubmittingSign] = useState(false);
+  const [signActionMessage, setSignActionMessage] = useState<string | null>(null);
+
+  // Canvas drawing ref and state
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
   const fetchOrder = () => {
     setIsLoading(true);
     fetch(`/api/orders/${orderNumber}`)
@@ -34,6 +47,9 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
         if (data.order) {
           setOrder(data.order);
           setTransferAmount(String(data.order.grand_total));
+          if (!typedSignName) {
+            setTypedSignName(data.order.recipient_name || '');
+          }
         }
       })
       .finally(() => setIsLoading(false));
@@ -42,6 +58,110 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
   useEffect(() => {
     fetchOrder();
   }, [orderNumber]);
+
+  // Drawing event handlers
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    setIsDrawing(true);
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    ctx.beginPath();
+    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  // Sign Later action
+  const handleSignLater = async () => {
+    setIsSubmittingSign(true);
+    setSignActionMessage(null);
+    try {
+      const res = await fetch(`/api/orders/${orderNumber}/signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'SIGN_LATER' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSignActionMessage('Status tanda tangan berhasil disetel ke Sign Later (Tanda Tangani Nanti saat serah terima kurir).');
+        setShowSignModal(false);
+        fetchOrder();
+      } else {
+        setSignActionMessage(data.error || 'Gagal menyetel Sign Later');
+      }
+    } catch {
+      setSignActionMessage('Terjadi kesalahan jaringan');
+    } finally {
+      setIsSubmittingSign(false);
+    }
+  };
+
+  // Sign Now action
+  const handleSaveSignature = async () => {
+    let sigData = '';
+    if (signMethod === 'draw' && canvasRef.current) {
+      sigData = canvasRef.current.toDataURL('image/png');
+    } else {
+      sigData = typedSignName.trim() || order?.recipient_name || 'Pelanggan SKYRA';
+    }
+
+    if (!sigData) {
+      setSignActionMessage('Mohon buat goresan tanda tangan atau masukkan nama penerima.');
+      return;
+    }
+
+    setIsSubmittingSign(true);
+    setSignActionMessage(null);
+    try {
+      const res = await fetch(`/api/orders/${orderNumber}/signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'SIGN_NOW', signatureData: sigData }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSignActionMessage('Tanda tangan digital penerimaan berhasil disimpan dan tercatat di audit log!');
+        setShowSignModal(false);
+        fetchOrder();
+      } else {
+        setSignActionMessage(data.error || 'Gagal menyimpan tanda tangan');
+      }
+    } catch {
+      setSignActionMessage('Terjadi kesalahan jaringan');
+    } finally {
+      setIsSubmittingSign(false);
+    }
+  };
 
   // Real-time synchronization for order status & payment changes!
   useEffect(() => {
@@ -215,13 +335,22 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
           </p>
         </div>
 
-        <button
-          onClick={() => window.print()}
-          className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors self-start sm:self-auto shadow-sm"
-        >
-          <Printer className="w-4 h-4 text-slate-600" />
-          <span>Cetak Bukti Faktur (Invoice)</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setShowInvoiceModal(true)}
+            className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Lihat Bukti Faktur (Invoice Resmi)</span>
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <Printer className="w-4 h-4 text-slate-600" />
+            <span>Cetak Langsung</span>
+          </button>
+        </div>
       </div>
 
       {/* Key Lifecycle Timestamps Cards (Waktu Masuk, Waktu Keluar, Waktu Selesai) */}
@@ -506,6 +635,200 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
         </div>
       )}
 
+      {/* Alert message if signature updated */}
+      {signActionMessage && (
+        <div className="p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span className="font-semibold">{signActionMessage}</span>
+          </div>
+          <button onClick={() => setSignActionMessage(null)} className="text-emerald-700 hover:text-emerald-950 font-bold ml-2">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Digital Receipt & Signature Section (Tanda Tangan Digital & Sign Later) */}
+      <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2.5 rounded-xl ${
+              order.signature_status === 'SIGNED'
+                ? 'bg-emerald-100 text-emerald-800'
+                : order.signature_status === 'SIGN_LATER'
+                ? 'bg-amber-100 text-amber-900'
+                : 'bg-indigo-100 text-indigo-800'
+            }`}>
+              <FileSignature className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-slate-900 text-sm">
+                  Tanda Tangan &amp; Berita Acara Penerimaan Barang
+                </h3>
+                {order.signature_status === 'SIGNED' ? (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black uppercase">
+                    Tanda Tangan Lengkap
+                  </span>
+                ) : order.signature_status === 'SIGN_LATER' ? (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black uppercase flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Sign Later (Tanda Tangan Nanti)
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 text-[10px] font-black uppercase">
+                    Menunggu Konfirmasi
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Pencatatan tanda terima sah digital atau opsi tunda (Sign Later) saat paket diserahterimakan oleh kurir
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowInvoiceModal(true)}
+            className="text-xs font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1 self-start sm:self-auto"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Lihat Lembar Faktur &amp; Resi</span>
+          </button>
+        </div>
+
+        {order.signature_status === 'SIGNED' ? (
+          /* Case 1: Already SIGNED */
+          <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            <div className="md:col-span-8 space-y-1.5 text-xs text-emerald-950">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <strong className="font-extrabold text-emerald-900">
+                  Faktur Telah Ditandatangani Secara Digital (Valid Certificate)
+                </strong>
+              </div>
+              <p className="text-emerald-800 text-[11px]">
+                Penerima <strong>{order.recipient_name}</strong> telah membubuhkan tanda tangan resmi pada faktur serah terima barang ini.
+              </p>
+              <div className="flex flex-wrap items-center gap-4 text-[11px] pt-1 font-mono text-emerald-900">
+                <span>
+                  Waktu Penandatanganan: <strong>{order.signed_at ? formatFullDateTime(order.signed_at) : formatFullDateTime(order.updated_at)}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div className="md:col-span-4 flex flex-col items-center justify-center p-3 bg-white rounded-xl border border-emerald-200 shadow-xs text-center">
+              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest block mb-1">
+                Spesimen Tanda Tangan
+              </span>
+              {order.customer_signature?.startsWith('data:image') ? (
+                <img
+                  src={order.customer_signature}
+                  alt="Customer Signature"
+                  className="max-h-16 max-w-full object-contain"
+                />
+              ) : (
+                <div className="py-2 px-4 font-serif italic text-lg font-bold text-slate-900 border-b border-slate-300">
+                  {order.customer_signature || order.recipient_name}
+                </div>
+              )}
+              <span className="text-[10px] text-emerald-700 font-bold mt-1 flex items-center gap-1">
+                <Check className="w-3 h-3" /> Terverifikasi Digital
+              </span>
+            </div>
+          </div>
+        ) : order.signature_status === 'SIGN_LATER' ? (
+          /* Case 2: User chose SIGN_LATER */
+          <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-600" />
+                <strong className="font-extrabold text-amber-950">
+                  Status: Tanda Tangan Ditunda (Sign Later)
+                </strong>
+              </div>
+              <p className="text-amber-800 text-[11px] leading-relaxed max-w-xl">
+                Anda memilih opsi <strong>Sign Later</strong>. Kurir pengantar ({order.shipping_method}) akan meminta tanda tangan fisik atau tanda terima digital secara langsung saat paket diserahkan ke alamat Anda.
+              </p>
+              <span className="text-[10px] text-amber-700 font-mono block pt-0.5">
+                Pilihan Sign Later tercatat pada sistem log waktu: {formatFullDateTime(order.updated_at)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => {
+                  setSignMethod('draw');
+                  setShowSignModal(true);
+                }}
+                className="px-4 py-2.5 bg-cyan-700 hover:bg-cyan-800 text-white font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Tandatangani Sekarang (Ubah ke Signed)</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Case 3: PENDING - Provide both SIGN LATER and SIGN NOW options */
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+            <div className="text-xs space-y-1">
+              <h4 className="font-bold text-slate-900">
+                Pilih Waktu Penandatanganan Dokumen Faktur &amp; Bukti Penerimaan:
+              </h4>
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Anda dapat menandatangani dokumen faktur serah terima sekarang, atau memilih <strong>Sign Later</strong> agar penandatanganan dilakukan saat kurir tiba di alamat Anda.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* Button 1: Sign Later */}
+              <button
+                onClick={handleSignLater}
+                disabled={isSubmittingSign}
+                className="p-3.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-left transition-all group flex items-start gap-3"
+              >
+                <div className="p-2 bg-amber-200 text-amber-900 rounded-lg group-hover:scale-105 transition-transform">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-extrabold text-amber-950 text-xs">
+                      Sign Later (Tanda Tangani Nanti)
+                    </span>
+                    <span className="text-[9px] font-bold bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded">
+                      Rekomendasi
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Tunda tanda tangan hingga paket fisik diserahkan oleh kurir pengantar.
+                  </p>
+                </div>
+              </button>
+
+              {/* Button 2: Sign Now */}
+              <button
+                onClick={() => {
+                  setSignMethod('draw');
+                  setShowSignModal(true);
+                }}
+                disabled={isSubmittingSign}
+                className="p-3.5 rounded-xl border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-left transition-all group flex items-start gap-3"
+              >
+                <div className="p-2 bg-cyan-600 text-white rounded-lg group-hover:scale-105 transition-transform">
+                  <PenTool className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-extrabold text-cyan-950 text-xs block">
+                    Tanda Tangan Digital Sekarang
+                  </span>
+                  <p className="text-[11px] text-cyan-800 mt-0.5">
+                    Bubuhkan tanda tangan online atau sertifikat nama penerima resmi pada faktur saat ini.
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Audit Log & Timestamp History Table */}
       <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -667,6 +990,385 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
           </div>
         </div>
       </div>
+
+      {/* MODAL 1: DIGITAL SIGNATURE & SIGN LATER POPUP */}
+      {showSignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 animate-in fade-in">
+          <div className="p-6 bg-white rounded-3xl border border-slate-200 w-full max-w-lg space-y-4 text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl">
+                  <FileSignature className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">
+                    Tanda Tangan Dokumen Penerimaan Pesanan
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono">#{order.order_number}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSignModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Mode Selector */}
+            <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setSignMethod('draw')}
+                className={`flex-1 py-1.5 font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  signMethod === 'draw'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Gambar Tanda Tangan (Touch/Mouse)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSignMethod('type')}
+                className={`flex-1 py-1.5 font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  signMethod === 'type'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Ketik Nama Sah (Digital Hash)</span>
+              </button>
+            </div>
+
+            {/* Signature Input Canvas or Text Field */}
+            {signMethod === 'draw' ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Goreskan tanda tangan Anda di dalam kotak:</span>
+                  <button
+                    type="button"
+                    onClick={clearCanvas}
+                    className="text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Hapus / Ulang</span>
+                  </button>
+                </div>
+                <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-slate-50/60 overflow-hidden touch-none flex items-center justify-center">
+                  <canvas
+                    ref={canvasRef}
+                    width={440}
+                    height={160}
+                    onMouseDown={startDrawing}
+                    onMouseMove={draw}
+                    onMouseUp={stopDrawing}
+                    onMouseLeave={stopDrawing}
+                    onTouchStart={startDrawing}
+                    onTouchMove={draw}
+                    onTouchEnd={stopDrawing}
+                    className="cursor-crosshair bg-white w-full max-w-full h-40"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-slate-700 block">
+                  Nama Lengkap Penandatangan:
+                </label>
+                <input
+                  type="text"
+                  value={typedSignName}
+                  onChange={(e) => setTypedSignName(e.target.value)}
+                  placeholder="Nama Lengkap Anda"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-cyan-500"
+                />
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
+                  <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest block mb-1">
+                    Preview Tanda Tangan Digital
+                  </span>
+                  <p className="font-serif italic text-2xl font-bold text-slate-900 py-2">
+                    {typedSignName || 'Nama Anda'}
+                  </p>
+                  <span className="text-[10px] text-emerald-700 font-mono font-semibold block">
+                    ✓ SKYRA Cryptographic Digital Signature
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Timestamp Note */}
+            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-center justify-between font-mono">
+              <span className="flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-blue-600" />
+                Stempel Waktu Pencatatan:
+              </span>
+              <span className="font-bold">{formatFullDateTime(new Date().toISOString())}</span>
+            </div>
+
+            {/* Actions: Sign Now OR Sign Later */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleSignLater}
+                disabled={isSubmittingSign}
+                className="w-full sm:w-auto px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Clock className="w-4 h-4 text-amber-600" />
+                <span>Pilih: Sign Later (Nanti saat Kurir Tiba)</span>
+              </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowSignModal(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveSignature}
+                  disabled={isSubmittingSign}
+                  className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-extrabold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {isSubmittingSign ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Simpan Tanda Tangan Sekarang</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: OFFICIAL PRINTABLE INVOICE MODAL */}
+      {showInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-in fade-in">
+          <div className="p-8 bg-white rounded-3xl border border-slate-200 w-full max-w-3xl my-6 space-y-6 text-slate-900 shadow-2xl">
+            {/* Top Bar with Print and Close */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-cyan-600" />
+                <span className="font-mono text-xs uppercase font-extrabold tracking-widest text-slate-500">
+                  Dokumen Faktur Resmi SKYRA Marine
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Cetak / Cetak PDF</span>
+                </button>
+                <button
+                  onClick={() => setShowInvoiceModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Official Invoice Body */}
+            <div className="space-y-6 print:m-0 print:p-0">
+              {/* Brand and Invoice Header */}
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-4 border-b border-slate-200">
+                <div>
+                  <h2 className="text-2xl font-black tracking-tight text-slate-950">SKYRA MARINE</h2>
+                  <p className="text-xs text-slate-500 font-medium">Perlengkapan Laut, Selancar, dan Peralatan Bahari Indonesia</p>
+                  <p className="text-[11px] text-slate-400">Jl. Pantai Batu Bolong No. 88, Canggu, Bali • Telp: (0361) 8899-77</p>
+                </div>
+                <div className="sm:text-right">
+                  <span className="text-xs uppercase font-bold text-slate-400 tracking-wider block">Faktur Penjualan</span>
+                  <span className="font-mono text-lg font-black text-slate-900">#{order.order_number}</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase inline-block mt-1 ${
+                    order.payment_status === 'PAID' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+                  }`}>
+                    {order.payment_status === 'PAID' ? 'LUNAS' : 'MENUNGGU PEMBAYARAN'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Precise Transaction Timestamps Grid */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block flex items-center gap-1">
+                    <LogIn className="w-3 h-3 text-blue-600" /> Jam Pesanan Masuk
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 text-[11px] block mt-0.5">
+                    {formatFullDateTime(incomingTime)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block flex items-center gap-1">
+                    <CreditCard className="w-3 h-3 text-emerald-600" /> Jam Pembayaran
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 text-[11px] block mt-0.5">
+                    {paidTime ? formatFullDateTime(paidTime) : 'Menunggu Konfirmasi'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block flex items-center gap-1">
+                    <LogOut className="w-3 h-3 text-emerald-600" /> Jam Keluar Gudang
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 text-[11px] block mt-0.5">
+                    {shippedTime ? formatFullDateTime(shippedTime) : 'Dalam Antrian Gudang'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-purple-600" /> Jam Selesai / Tiba
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 text-[11px] block mt-0.5">
+                    {deliveredTime ? formatFullDateTime(deliveredTime) : 'Pesanan Aktif'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Customer & Shipping Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Tujuan Pengiriman:</span>
+                  <strong className="text-slate-900 text-sm block mt-0.5">{order.recipient_name}</strong>
+                  <p className="text-slate-600">{order.recipient_phone}</p>
+                  <p className="text-slate-600 mt-0.5">{order.shipping_address}, {order.shipping_city}, {order.shipping_province} {order.shipping_postal}</p>
+                </div>
+                <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Metode Pembayaran &amp; Kurir:</span>
+                  <p className="font-bold text-slate-800 mt-0.5">Metode: {order.payment_method}</p>
+                  <p className="text-slate-600">Ekspedisi: {order.shipping_method}</p>
+                  {order.tracking_number && (
+                    <p className="font-mono text-cyan-800 font-bold mt-1">Resi: {order.tracking_number}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-100 text-slate-600 uppercase text-[10px] font-bold">
+                    <tr>
+                      <th className="p-3">Deskripsi Barang</th>
+                      <th className="p-3">SKU</th>
+                      <th className="p-3 text-right">Harga Satuan</th>
+                      <th className="p-3 text-center">Qty</th>
+                      <th className="p-3 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {order.items?.map((it) => (
+                      <tr key={it.id}>
+                        <td className="p-3 font-semibold text-slate-900">
+                          {it.product_name} <span className="text-slate-500 font-normal">({it.variant_title})</span>
+                        </td>
+                        <td className="p-3 font-mono text-slate-500">{it.sku}</td>
+                        <td className="p-3 text-right">Rp {it.unit_price.toLocaleString('id-ID')}</td>
+                        <td className="p-3 text-center font-bold">{it.quantity}</td>
+                        <td className="p-3 text-right font-bold text-slate-900">Rp {it.subtotal.toLocaleString('id-ID')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200 font-bold">
+                    <tr>
+                      <td colSpan={4} className="p-2.5 text-right text-slate-600">Subtotal Produk:</td>
+                      <td className="p-2.5 text-right font-mono">Rp {order.subtotal.toLocaleString('id-ID')}</td>
+                    </tr>
+                    {order.voucher_discount > 0 && (
+                      <tr className="text-emerald-700">
+                        <td colSpan={4} className="p-2 text-right">Diskon Voucher ({order.voucher_code}):</td>
+                        <td className="p-2 text-right font-mono">-Rp {order.voucher_discount.toLocaleString('id-ID')}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td colSpan={4} className="p-2 text-right text-slate-600">Biaya Pengiriman:</td>
+                      <td className="p-2 text-right font-mono">Rp {order.shipping_cost.toLocaleString('id-ID')}</td>
+                    </tr>
+                    <tr className="text-sm bg-slate-100 text-slate-950 font-black">
+                      <td colSpan={4} className="p-3 text-right">TOTAL TAGIHAN:</td>
+                      <td className="p-3 text-right font-mono text-base">Rp {order.grand_total.toLocaleString('id-ID')}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Formal Signature Receipt Section (Sign Later / Signed Box) */}
+              <div className="grid grid-cols-2 gap-6 pt-4 border-t border-slate-200 text-xs">
+                {/* Petugas Gudang (Pengirim) */}
+                <div className="p-4 border border-slate-200 rounded-2xl bg-slate-50/50 flex flex-col justify-between h-36">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Pengirim / Bagian Logistik:</span>
+                    <strong className="text-slate-800">PT SKYRA MARINE INDONESIA</strong>
+                  </div>
+                  <div className="text-center py-1">
+                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono text-[10px] font-bold">
+                      ✓ DIKELUARKAN DARI GUDANG: {shippedTime ? formatShortDateTime(shippedTime) : 'DALAM PROSES'}
+                    </span>
+                  </div>
+                  <div className="border-t border-slate-300 pt-1 text-center text-[10px] text-slate-500 font-medium">
+                    ( Bagian Logistik Gudang SKYRA )
+                  </div>
+                </div>
+
+                {/* Penerima / Pelanggan (Customer) */}
+                <div className="p-4 border border-slate-200 rounded-2xl bg-slate-50/50 flex flex-col justify-between h-36">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Penerima Barang:</span>
+                    <strong className="text-slate-800">{order.recipient_name}</strong>
+                  </div>
+
+                  <div className="text-center py-1">
+                    {order.signature_status === 'SIGNED' ? (
+                      <div>
+                        {order.customer_signature?.startsWith('data:image') ? (
+                          <img
+                            src={order.customer_signature}
+                            alt="Signature"
+                            className="max-h-12 mx-auto object-contain"
+                          />
+                        ) : (
+                          <p className="font-serif italic font-bold text-slate-900 text-sm">
+                            {order.customer_signature || order.recipient_name}
+                          </p>
+                        )}
+                        <span className="text-[9px] text-emerald-700 font-mono font-bold block">
+                          Ditandatangani: {order.signed_at ? formatFullDateTime(order.signed_at) : formatShortDateTime(order.updated_at)}
+                        </span>
+                      </div>
+                    ) : order.signature_status === 'SIGN_LATER' ? (
+                      <div className="p-1 bg-amber-50 border border-amber-200 rounded text-amber-900 text-[10px] font-bold">
+                        <span>[ STATUS: SIGN LATER ]</span>
+                        <p className="font-normal text-[9px] text-amber-800 mt-0.5">
+                          Tanda tangan fisik saat kurir menyerahkan paket
+                        </p>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px] block">
+                        ( Tanda tangan basah / digital saat serah terima )
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="border-t border-slate-300 pt-1 text-center text-[10px] text-slate-500 font-medium">
+                    ( {order.recipient_name} )
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Package, ArrowRight, Clock, CheckCircle2, ChevronRight, 
-  Truck, ArrowDownLeft, ArrowUpRight, LogIn, LogOut, Timer
+  Truck, ArrowDownLeft, ArrowUpRight, LogIn, LogOut, Timer,
+  FileSignature, Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { Order } from '../types/index.ts';
@@ -165,6 +166,19 @@ export function OrdersListView({ onSelectOrder, onNavigate }: OrdersListViewProp
                     <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[10px] font-bold">
                       {ord.order_status}
                     </span>
+                    {ord.signature_status === 'SIGNED' ? (
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-300 rounded-md text-[10px] font-bold flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Tanda Tangan Lengkap
+                      </span>
+                    ) : ord.signature_status === 'SIGN_LATER' ? (
+                      <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-md text-[10px] font-bold flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Sign Later (Tanda Tangan Nanti)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[10px] font-medium flex items-center gap-1">
+                        <FileSignature className="w-3 h-3" /> Belum TTD / Sign Later
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 self-end sm:self-auto">

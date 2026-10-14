@@ -4,9 +4,10 @@ import { useAuth } from '../context/AuthContext.tsx';
 
 interface LoginViewProps {
   onSuccess: () => void;
+  onSignLater?: () => void;
 }
 
-export function LoginView({ onSuccess }: LoginViewProps) {
+export function LoginView({ onSuccess, onSignLater }: LoginViewProps) {
   const { login, register } = useAuth();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
@@ -141,6 +142,15 @@ export function LoginView({ onSuccess }: LoginViewProps) {
           >
             {isLoading ? 'Memproses...' : isRegisterMode ? 'Daftar Sekarang' : 'Masuk Akun'}
             <ArrowRight className="w-4 h-4" />
+          </button>
+
+          {/* Sign Later / Guest browsing option */}
+          <button
+            type="button"
+            onClick={onSignLater || onSuccess}
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 border border-slate-200"
+          >
+            <span>Sign Later / Masuk Nanti (Lanjut Jelajahi Toko)</span>
           </button>
         </form>
 

@@ -398,6 +398,9 @@ export function initDatabase() {
   try { db.exec("ALTER TABLE orders ADD COLUMN shipped_at DATETIME;"); } catch {}
   try { db.exec("ALTER TABLE orders ADD COLUMN delivered_at DATETIME;"); } catch {}
   try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN customer_signature TEXT;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN signature_status TEXT DEFAULT 'PENDING';"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN signed_at DATETIME;"); } catch {}
 
   // Backfill incoming_at with created_at if missing
   try {
