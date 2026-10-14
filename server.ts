@@ -12,6 +12,7 @@ import { addSSEClient } from './src/server/sse.ts';
 import { authRouter } from './src/server/routes/auth.ts';
 import { productsRouter } from './src/server/routes/products.ts';
 import { cartRouter } from './src/server/routes/cart.ts';
+import { seedWishlistAndWaitingList } from './src/server/seed-waiting-list.ts';
 import { ordersRouter } from './src/server/routes/orders.ts';
 import { adminRouter } from './src/server/routes/admin.ts';
 
@@ -25,9 +26,11 @@ async function startServer() {
   initDatabase();
   seedInitialData();
   seedProducts();
+  seedWishlistAndWaitingList();
 
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  // AI Studio requires the dev server to run on port 3000. Port 8080 is reserved for internal Nginx.
+  const PORT = 3000;
 
   // JSON Body parser with 10MB limit for base64 images (visual search & receipt upload)
   app.use(express.json({ limit: '10mb' }));

@@ -290,7 +290,7 @@ adminRouter.get('/orders', (req: Request, res: Response) => {
   res.json({ orders });
 });
 
-// Update Order Status
+// Update Order Status (With Exact Outgoing / Processing / Completion Timestamps)
 adminRouter.put('/orders/:orderNumber/status', (req: Request, res: Response) => {
   const { orderNumber } = req.params;
   const { status, trackingNumber } = req.body;
@@ -298,18 +298,84 @@ adminRouter.put('/orders/:orderNumber/status', (req: Request, res: Response) => 
   const order = db.prepare('SELECT * FROM orders WHERE order_number = ?').get(orderNumber) as any;
   if (!order) return res.status(404).json({ error: 'Pesanan tidak ditemukan' });
 
-  db.prepare(`
-    UPDATE orders
-    SET order_status = ?,
-        tracking_number = COALESCE(?, tracking_number),
-        updated_at = CURRENT_TIMESTAMP
-    WHERE order_number = ?
-  `).run(status, trackingNumber || null, orderNumber);
+  const adminUser = (req as any).user;
+  const actorName = adminUser?.name || 'Admin Gudang SKYRA';
 
-  recordAuditLog(req, 'UPDATE_ORDER_STATUS', 'orders', orderNumber, { old_status: order.order_status }, { new_status: status });
+  db.transaction(() => {
+    let shippedAtClause = '';
+    let processedAtClause = '';
+    let deliveredAtClause = '';
+    let cancelledAtClause = '';
+
+    if (status === 'SHIPPED') {
+      shippedAtClause = ', shipped_at = CURRENT_TIMESTAMP';
+    } else if (status === 'PROCESSING' || status === 'PACKED') {
+      processedAtClause = ', processed_at = COALESCE(processed_at, CURRENT_TIMESTAMP)';
+    } else if (status === 'DELIVERED' || status === 'COMPLETED') {
+      deliveredAtClause = ', delivered_at = CURRENT_TIMESTAMP';
+    } else if (status === 'CANCELLED') {
+      cancelledAtClause = ', cancelled_at = CURRENT_TIMESTAMP';
+    }
+
+    db.prepare(`
+      UPDATE orders
+      SET order_status = ?,
+          tracking_number = COALESCE(?, tracking_number),
+          updated_at = CURRENT_TIMESTAMP
+          ${shippedAtClause}
+          ${processedAtClause}
+          ${deliveredAtClause}
+          ${cancelledAtClause}
+      WHERE order_number = ?
+    `).run(status, trackingNumber || null, orderNumber);
+
+    // Insert rich audit history entry
+    let eventType = 'UPDATE_STATUS';
+    let title = `Status Diubah ke ${status}`;
+    let description = `Status pesanan diperbarui oleh ${actorName}`;
+
+    if (status === 'SHIPPED') {
+      eventType = 'PESANAN_KELUAR';
+      title = 'Pesanan Keluar dari Gudang (Diserahkan ke Kurir)';
+      description = `Pesanan #${orderNumber} resmi keluar dari gudang pengiriman SKYRA Marine. Nomor Resi: ${trackingNumber || order.tracking_number || 'Kurir Standar'}. Waktu keluar dicatat pada sistem.`;
+    } else if (status === 'PROCESSING') {
+      eventType = 'PROSES_GUDANG';
+      title = 'Pesanan Mulai Diproses di Gudang';
+      description = 'Tim operasional gudang sedang memverifikasi isi paket dan menyiapkan packing pelindung.';
+    } else if (status === 'PACKED') {
+      eventType = 'PROSES_GUDANG';
+      title = 'Pesanan Selesai Dikemas & Siap Keluar';
+      description = 'Paket pesanan telah dikemas dengan label pengiriman dan diletakkan di rak staging kurir.';
+    } else if (status === 'DELIVERED' || status === 'COMPLETED') {
+      eventType = 'PESANAN_SELESAI';
+      title = 'Pesanan Tiba & Diterima Pelanggan';
+      description = `Pesanan #${orderNumber} telah sampai di tujuan dan diterima dengan baik.`;
+    } else if (status === 'CANCELLED') {
+      eventType = 'PESANAN_DIBATALKAN';
+      title = 'Pesanan Dibatalkan';
+      description = `Pesanan #${orderNumber} dibatalkan oleh ${actorName}.`;
+    }
+
+    db.prepare(`
+      INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+    `).run(order.id, orderNumber, status, eventType, title, description, actorName);
+  })();
+
+  recordAuditLog(req, 'UPDATE_ORDER_STATUS', 'orders', orderNumber, { old_status: order.order_status }, { new_status: status, trackingNumber });
   broadcastRealtimeEvent({ type: 'ORDER_STATUS_CHANGED', data: { orderNumber, status, trackingNumber } });
 
-  res.json({ message: `Status pesanan diubah menjadi: ${status}` });
+  res.json({ message: `Status pesanan #${orderNumber} berhasil diubah menjadi: ${status}` });
+});
+
+// 4b. Get Order Detailed Timestamps & Status History
+adminRouter.get('/orders/:orderNumber/history', (req: Request, res: Response) => {
+  const { orderNumber } = req.params;
+  const order = db.prepare('SELECT * FROM orders WHERE order_number = ?').get(orderNumber) as any;
+  if (!order) return res.status(404).json({ error: 'Pesanan tidak ditemukan' });
+
+  const history = db.prepare('SELECT * FROM order_status_history WHERE order_id = ? ORDER BY id ASC').all(order.id);
+  res.json({ order, history });
 });
 
 // 5. Payment Verification & Approval
@@ -327,6 +393,28 @@ adminRouter.get('/payments', (_req: Request, res: Response) => {
   res.json({ payments });
 });
 
+// 5b. Dedicated Transactions Waiting List (Antrian Transaksi Menunggu)
+adminRouter.get('/waiting-list', (_req: Request, res: Response) => {
+  const waitingOrders = db.prepare(`
+    SELECT o.*, 
+           p.id as payment_id, p.status as payment_status_detail, p.reference_code,
+           pp.id as proof_id, pp.image_url as proof_image, pp.bank_sender, pp.sender_name, pp.status as proof_status,
+           pp.admin_notes as proof_notes,
+           (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as items_count,
+           (SELECT GROUP_CONCAT(product_name || ' (' || quantity || 'x)', ', ') FROM order_items WHERE order_id = o.id) as items_summary
+    FROM orders o
+    LEFT JOIN payments p ON p.order_id = o.id
+    LEFT JOIN payment_proofs pp ON pp.payment_id = p.id
+    WHERE o.order_status IN ('PAYMENT_VERIFICATION', 'PENDING_PAYMENT')
+       OR o.payment_status IN ('UNDER_REVIEW', 'PENDING')
+    ORDER BY 
+      CASE WHEN o.order_status = 'PAYMENT_VERIFICATION' THEN 1 ELSE 2 END,
+      o.id DESC
+  `).all();
+
+  res.json({ waitingList: waitingOrders });
+});
+
 // Approve or Reject Payment Proof
 adminRouter.put('/payments/:id/verify', (req: Request, res: Response) => {
   const paymentId = Number(req.params.id);
@@ -340,10 +428,16 @@ adminRouter.put('/payments/:id/verify', (req: Request, res: Response) => {
 
   const verifyTx = db.transaction(() => {
     if (action === 'APPROVE') {
-      // 1. Mark Payment as PAID
+      // 1. Mark Payment as PAID & update order timestamps (Waktu Pembayaran & Masuk Antrian Gudang)
       db.prepare("UPDATE payments SET status = 'PAID', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
-      db.prepare("UPDATE orders SET payment_status = 'PAID', order_status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.id);
+      db.prepare("UPDATE orders SET payment_status = 'PAID', order_status = 'PROCESSING', paid_at = CURRENT_TIMESTAMP, processed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.id);
       db.prepare("UPDATE payment_proofs SET status = 'APPROVED', admin_notes = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE payment_id = ?").run(adminNotes || 'Diverifikasi oleh admin', (req as any).user.id, paymentId);
+
+      // Record in status history
+      db.prepare(`
+        INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+        VALUES (?, ?, 'PROCESSING', 'PEMBAYARAN_DITERIMA', 'Pembayaran Diverifikasi & Disetujui', ?, CURRENT_TIMESTAMP, ?)
+      `).run(order.id, order.order_number, `Pembayaran resmi disetujui. ${adminNotes ? 'Catatan: ' + adminNotes : 'Pesanan diteruskan ke antrian gudang.'}`, (req as any).user?.name || 'Admin SKYRA');
 
       // 2. Finalize stock deduction: transfer from reserved to sold!
       const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id) as any[];
@@ -378,6 +472,12 @@ adminRouter.put('/payments/:id/verify', (req: Request, res: Response) => {
       db.prepare("UPDATE orders SET payment_status = 'FAILED', order_status = 'PENDING_PAYMENT', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.id);
       db.prepare("UPDATE payment_proofs SET status = 'REJECTED', admin_notes = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE payment_id = ?").run(adminNotes || 'Bukti transfer tidak valid/dana belum masuk', (req as any).user.id, paymentId);
 
+      // Record in status history
+      db.prepare(`
+        INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+        VALUES (?, ?, 'PENDING_PAYMENT', 'PEMBAYARAN_DITOLAK', 'Bukti Transfer Ditolak', ?, CURRENT_TIMESTAMP, ?)
+      `).run(order.id, order.order_number, `Bukti transfer ditolak: ${adminNotes || 'Bukti transfer tidak valid/dana belum masuk'}`, (req as any).user?.name || 'Admin SKYRA');
+
       // Notify customer
       if (order.user_id) {
         db.prepare(`
@@ -395,6 +495,26 @@ adminRouter.put('/payments/:id/verify', (req: Request, res: Response) => {
   broadcastRealtimeEvent({ type: 'STOCK_UPDATE', data: { orderNumber: order.order_number } });
 
   res.json({ message: action === 'APPROVE' ? 'Pembayaran berhasil disetujui!' : 'Pembayaran ditolak' });
+});
+
+// 5.1 Transactions Waiting List Queue
+adminRouter.get('/waiting-list', (_req: Request, res: Response) => {
+  const waitingOrders = db.prepare(`
+    SELECT o.*, p.status as payment_status_detail, p.reference_code, p.expires_at, p.id as payment_id,
+           pp.image_url as proof_image, pp.bank_sender, pp.sender_name, pp.status as proof_status,
+           pp.admin_notes, pp.id as proof_id,
+           (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as items_count
+    FROM orders o
+    LEFT JOIN payments p ON p.order_id = o.id
+    LEFT JOIN payment_proofs pp ON pp.payment_id = p.id
+    WHERE o.order_status IN ('PENDING_PAYMENT', 'PAYMENT_VERIFICATION')
+       OR o.payment_status IN ('PENDING', 'UNDER_REVIEW')
+    ORDER BY 
+      CASE WHEN o.order_status = 'PAYMENT_VERIFICATION' THEN 1 ELSE 2 END,
+      o.id ASC
+  `).all();
+
+  res.json({ waitingList: waitingOrders });
 });
 
 // 6. Customers Management

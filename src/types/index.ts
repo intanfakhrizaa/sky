@@ -6,6 +6,38 @@ export interface User {
   role: 'customer' | 'staff' | 'admin' | 'superadmin';
   avatar_url?: string;
   status: 'active' | 'suspended';
+  loyalty_points?: number;
+  membership_tier?: 'standard' | 'silver' | 'gold' | 'platinum';
+  member_number?: string;
+  member_joined_at?: string;
+  member_discount_percent?: number;
+}
+
+export interface LoyaltyHistoryItem {
+  id: number;
+  user_id: number;
+  points: number;
+  balance_after: number;
+  action_type: 'PURCHASE_REWARD' | 'REGISTRATION_BONUS' | 'TIER_UPGRADE' | 'REDEMPTION';
+  description: string;
+  order_id?: number;
+  created_at: string;
+}
+
+export interface StoreLocation {
+  id: string;
+  name: string;
+  type: string;
+  address: string;
+  city: string;
+  province: string;
+  phone: string;
+  hours: string;
+  lat: number;
+  lng: number;
+  services: string[];
+  image: string;
+  isPickupAvailable: boolean;
 }
 
 export interface Address {
@@ -151,6 +183,18 @@ export interface OrderItem {
   subtotal: number;
 }
 
+export interface OrderStatusHistoryItem {
+  id: number;
+  order_id: number;
+  order_number: string;
+  status: string;
+  event_type: 'PESANAN_MASUK' | 'PEMBAYARAN_DITERIMA' | 'PROSES_GUDANG' | 'PESANAN_KELUAR' | 'PESANAN_SELESAI' | 'PESANAN_DIBATALKAN' | string;
+  title: string;
+  description?: string;
+  timestamp: string;
+  actor?: string;
+}
+
 export interface Order {
   id: number;
   order_number: string;
@@ -175,9 +219,17 @@ export interface Order {
   tracking_number?: string;
   notes?: string;
   created_at: string;
+  incoming_at?: string;
+  paid_at?: string;
+  processed_at?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+  cancelled_at?: string;
+  updated_at?: string;
   items?: OrderItem[];
   payment?: any;
   paymentProof?: any;
+  status_history?: OrderStatusHistoryItem[];
 }
 
 export interface Review {

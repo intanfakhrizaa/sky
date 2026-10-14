@@ -14,7 +14,7 @@ export function getUserFromToken(req: Request) {
   try {
     const userIdMatch = token.match(/^user_(\d+)$/);
     if (userIdMatch) {
-      const user = db.prepare('SELECT id, email, name, phone, role, avatar_url, status FROM users WHERE id = ?').get(Number(userIdMatch[1])) as any;
+      const user = db.prepare('SELECT id, email, name, phone, role, avatar_url, status, loyalty_points, membership_tier, member_number, member_joined_at, member_discount_percent FROM users WHERE id = ?').get(Number(userIdMatch[1])) as any;
       return user && user.status === 'active' ? user : null;
     }
   } catch (err) {
@@ -80,7 +80,12 @@ authRouter.post('/login', (req: Request, res: Response) => {
     phone: user.phone,
     role: user.role,
     avatar_url: user.avatar_url,
-    status: user.status
+    status: user.status,
+    loyalty_points: user.loyalty_points || 0,
+    membership_tier: user.membership_tier || 'standard',
+    member_number: user.member_number || null,
+    member_joined_at: user.member_joined_at || null,
+    member_discount_percent: user.member_discount_percent || 0
   };
   const token = `user_${user.id}`;
 
@@ -117,7 +122,7 @@ authRouter.put('/profile', (req: Request, res: Response) => {
     WHERE id = ?
   `).run(name, phone, avatar_url, user.id);
 
-  const updated = db.prepare('SELECT id, email, name, phone, role, avatar_url, status FROM users WHERE id = ?').get(user.id);
+  const updated = db.prepare('SELECT id, email, name, phone, role, avatar_url, status, loyalty_points, membership_tier, member_number, member_joined_at, member_discount_percent FROM users WHERE id = ?').get(user.id);
   return res.json({ user: updated, message: 'Profil berhasil diperbarui' });
 });
 
@@ -150,4 +155,182 @@ authRouter.post('/addresses', (req: Request, res: Response) => {
 
   const newAddress = db.prepare('SELECT * FROM addresses WHERE id = ?').get(info.lastInsertRowid);
   return res.json({ address: newAddress, message: 'Alamat berhasil ditambahkan' });
+});
+
+// Loyalty Points & Membership System
+authRouter.get('/loyalty', (req: Request, res: Response) => {
+  const user = getUserFromToken(req);
+  if (!user) return res.status(401).json({ error: 'Belum login' });
+
+  const history = db.prepare(`
+    SELECT * FROM loyalty_history
+    WHERE user_id = ?
+    ORDER BY id DESC
+  `).all(user.id);
+
+  const points = user.loyalty_points || 0;
+  let tier = user.membership_tier || 'standard';
+  let nextTier = 'silver';
+  let pointsNeeded = 1000 - points;
+  let perkDiscount = user.member_discount_percent || 0;
+
+  if (points >= 5000) {
+    tier = 'platinum';
+    nextTier = 'max';
+    pointsNeeded = 0;
+    perkDiscount = 15;
+  } else if (points >= 2500) {
+    tier = 'gold';
+    nextTier = 'platinum';
+    pointsNeeded = 5000 - points;
+    perkDiscount = 10;
+  } else if (points >= 1000) {
+    tier = 'silver';
+    nextTier = 'gold';
+    pointsNeeded = 2500 - points;
+    perkDiscount = 5;
+  }
+
+  return res.json({
+    points,
+    tier,
+    memberNumber: user.member_number || null,
+    joinedAt: user.member_joined_at || null,
+    discountPercent: perkDiscount,
+    nextTier,
+    pointsNeeded: Math.max(0, pointsNeeded),
+    history
+  });
+});
+
+// Member Registration to get instant discount & welcome points
+authRouter.post('/member/register', (req: Request, res: Response) => {
+  const user = getUserFromToken(req);
+  if (!user) return res.status(401).json({ error: 'Harap login terlebih dahulu' });
+
+  if (user.member_number) {
+    return res.status(400).json({ error: 'Anda sudah memiliki kartu member aktif', memberNumber: user.member_number });
+  }
+
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const memberNumber = `SKY-VIP-${user.id}${randomSuffix}`;
+  const bonusPoints = 250;
+  const currentPoints = (user.loyalty_points || 0) + bonusPoints;
+  const discountPercent = 5;
+  const tier = currentPoints >= 1000 ? 'silver' : 'standard';
+
+  db.prepare(`
+    UPDATE users
+    SET member_number = ?,
+        loyalty_points = ?,
+        membership_tier = ?,
+        member_joined_at = CURRENT_TIMESTAMP,
+        member_discount_percent = ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(memberNumber, currentPoints, tier, discountPercent, user.id);
+
+  db.prepare(`
+    INSERT INTO loyalty_history (user_id, points, balance_after, action_type, description)
+    VALUES (?, ?, ?, 'REGISTRATION_BONUS', 'Bonus Sambutan Pendaftaran Member Baru SKYRA Marine VIP Club')
+  `).run(user.id, bonusPoints, currentPoints);
+
+  const updatedUser = db.prepare('SELECT id, email, name, phone, role, avatar_url, status, loyalty_points, membership_tier, member_number, member_joined_at, member_discount_percent FROM users WHERE id = ?').get(user.id);
+
+  return res.json({
+    success: true,
+    message: 'Selamat! Kartu Member VIP SKYRA Anda berhasil diaktifkan dengan bonus 250 Poin & Diskon 5%!',
+    user: updatedUser,
+    memberNumber,
+    points: currentPoints
+  });
+});
+
+// Customer View Transactions with Full Items & Shipment Tracking
+authRouter.get('/transactions', (req: Request, res: Response) => {
+  const user = getUserFromToken(req);
+  if (!user) return res.status(401).json({ error: 'Harap login' });
+
+  const orders = db.prepare(`
+    SELECT o.*, p.status as payment_status_detail, p.method as pay_method,
+      (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as items_count
+    FROM orders o
+    LEFT JOIN payments p ON p.order_id = o.id
+    WHERE o.user_id = ?
+    ORDER BY o.id DESC
+  `).all(user.id) as any[];
+
+  for (const ord of orders) {
+    ord.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(ord.id);
+  }
+
+  return res.json({ transactions: orders });
+});
+
+// Marine Outlets, Warehouses & Hubs Map ("Where the stuff and maps")
+authRouter.get('/stores', (_req: Request, res: Response) => {
+  return res.json({
+    stores: [
+      {
+        id: 'skyra-canggu',
+        name: 'SKYRA Flagship Store & Surf Test Lab',
+        type: 'Flagship Store & Surf Lab',
+        city: 'Canggu, Bali',
+        province: 'Bali',
+        address: 'Jl. Pantai Batu Bolong No. 88, Canggu, Badung, Bali 80361',
+        phone: '+62 812-3456-7801',
+        hours: 'Setiap Hari 07:00 - 21:00 WITA',
+        lat: -8.6595,
+        lng: 115.1301,
+        services: ['In-Store Pickup', 'Demo Surfboard & Fins', 'Ding Repair Express', 'Surf Wax Station'],
+        image: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=600',
+        isPickupAvailable: true
+      },
+      {
+        id: 'skyra-sanur',
+        name: 'SKYRA Dive & Marine Harbor Station',
+        type: 'Harbor Base & Dive Shop',
+        city: 'Sanur, Denpasar',
+        province: 'Bali',
+        address: 'Pelabuhan Sanur, Jl. Danau Tamblingan No. 42, Sanur, Denpasar 80228',
+        phone: '+62 819-9988-8123',
+        hours: 'Setiap Hari 06:30 - 19:00 WITA',
+        lat: -8.6749,
+        lng: 115.2625,
+        services: ['In-Store Pickup', 'Regulator & BCD Overhaul', 'Tank Refill Air & Nitrox', 'Fitting Wet Tryout'],
+        image: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=600',
+        isPickupAvailable: true
+      },
+      {
+        id: 'skyra-ancol',
+        name: 'SKYRA Marina & Central Logistics Hub',
+        type: 'Central Warehouse & Marina',
+        city: 'Jakarta Utara',
+        province: 'DKI Jakarta',
+        address: 'Kompleks Dermaga Marina Ancol Blok D-14, Pademangan, Jakarta Utara 14430',
+        phone: '+62 21-6458-9900',
+        hours: 'Senin - Minggu 08:00 - 20:00 WIB',
+        lat: -6.1197,
+        lng: 106.8315,
+        services: ['In-Store Pickup', 'Boat Rigging & Rope Splicing', 'Kayak & SUP Assembly', 'Gudang Pusat Distribusi'],
+        image: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=600',
+        isPickupAvailable: true
+      },
+      {
+        id: 'skyra-bajo',
+        name: 'SKYRA Komodo Oceanic Expedition Outpost',
+        type: 'Expedition Outpost',
+        city: 'Labuan Bajo',
+        province: 'Nusa Tenggara Timur',
+        address: 'Jl. Soekarno Hatta No. 19 (Waterfront Marina Pier), Labuan Bajo 86554',
+        phone: '+62 821-4455-6677',
+        hours: 'Setiap Hari 06:00 - 21:00 WITA',
+        lat: -8.4964,
+        lng: 119.8877,
+        services: ['In-Store Pickup', 'Liveaboard Rental Equipment', 'Emergency Marine Beacon Check', 'Reef-Safe Sunscreen Bar'],
+        image: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600',
+        isPickupAvailable: true
+      }
+    ]
+  });
 });

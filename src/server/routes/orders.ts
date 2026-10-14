@@ -122,15 +122,15 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
     // 3. Generate Order Number
     const orderNumber = `SKY-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 4. Create Order Record
+    // 4. Create Order Record with exact incoming timestamp (Waktu Pesanan Masuk)
     const orderInsert = db.prepare(`
       INSERT INTO orders (
         order_number, user_id, guest_email, recipient_name, recipient_phone,
         shipping_address, shipping_city, shipping_province, shipping_postal,
         shipping_method, shipping_cost, subtotal, wholesale_discount,
         voucher_code, voucher_discount, grand_total, payment_method,
-        payment_status, order_status, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING_PAYMENT', ?)
+        payment_status, order_status, notes, incoming_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING_PAYMENT', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).run(
       orderNumber,
       user?.id || null,
@@ -200,11 +200,27 @@ ordersRouter.post('/checkout/create-order', (req: Request, res: Response) => {
     // 7. Remove ordered items from Cart
     db.prepare('DELETE FROM cart_items WHERE cart_id = ? AND is_selected = 1').run(cart.id);
 
-    // 8. Add Notification
+    // 8. Add Initial Status History (Waktu Pesanan Masuk) & Notification
+    db.prepare(`
+      INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+      VALUES (?, ?, 'PENDING_PAYMENT', 'PESANAN_MASUK', 'Pesanan Masuk ke Sistem', ?, CURRENT_TIMESTAMP, ?)
+    `).run(orderId, orderNumber, `Pesanan #${orderNumber} dibuat oleh ${recipient_name} via ${payment_method || 'QRIS'} (Total: Rp ${grandTotal.toLocaleString('id-ID')})`, user?.name || recipient_name);
+
     db.prepare(`
       INSERT INTO notifications (user_id, role, title, message, type, link)
       VALUES (?, 'admin', 'Pesanan Baru Masuk!', ?, 'order', ?)
     `).run(user?.id || null, `Pesanan #${orderNumber} senilai Rp ${grandTotal.toLocaleString('id-ID')} dibuat.`, `/admin/orders`);
+
+    // 8b. Award Loyalty Points on Purchase
+    if (user?.id) {
+      const earnedPoints = Math.max(10, Math.floor(grandTotal / 1000));
+      const currentPts = (user.loyalty_points || 0) + earnedPoints;
+      db.prepare('UPDATE users SET loyalty_points = loyalty_points + ? WHERE id = ?').run(earnedPoints, user.id);
+      db.prepare(`
+        INSERT INTO loyalty_history (user_id, points, balance_after, action_type, description, order_id)
+        VALUES (?, ?, ?, 'PURCHASE_REWARD', ?, ?)
+      `).run(user.id, earnedPoints, currentPts, `Poin reward belanja pesanan #${orderNumber}`, orderId);
+    }
 
     return { orderId, orderNumber, grandTotal, refCode, qrData, expiresAt };
   });
@@ -256,13 +272,15 @@ ordersRouter.get('/orders/:orderNumber', (req: Request, res: Response) => {
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
   const payment = db.prepare('SELECT * FROM payments WHERE order_id = ?').get(order.id) as any;
   const paymentProof = db.prepare('SELECT * FROM payment_proofs WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id) as any;
+  const statusHistory = db.prepare('SELECT * FROM order_status_history WHERE order_id = ? ORDER BY id ASC').all(order.id) as any[];
 
   res.json({
     order: {
       ...order,
       items,
       payment,
-      paymentProof
+      paymentProof,
+      status_history: statusHistory
     }
   });
 });
@@ -291,7 +309,13 @@ ordersRouter.post('/orders/:orderNumber/payment-proof', (req: Request, res: Resp
 
     // Update payment & order status to UNDER_REVIEW / PAYMENT_VERIFICATION
     db.prepare("UPDATE payments SET status = 'UNDER_REVIEW' WHERE id = ?").run(payment.id);
-    db.prepare("UPDATE orders SET payment_status = 'UNDER_REVIEW', order_status = 'PAYMENT_VERIFICATION' WHERE id = ?").run(order.id);
+    db.prepare("UPDATE orders SET payment_status = 'UNDER_REVIEW', order_status = 'PAYMENT_VERIFICATION', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.id);
+
+    // Record into status history
+    db.prepare(`
+      INSERT INTO order_status_history (order_id, order_number, status, event_type, title, description, timestamp, actor)
+      VALUES (?, ?, 'PAYMENT_VERIFICATION', 'PEMBAYARAN_DITERIMA', 'Bukti Transfer Diunggah (Menunggu Verifikasi)', ?, CURRENT_TIMESTAMP, ?)
+    `).run(order.id, orderNumber, `Struk transfer bank ${bankSender} a.n ${senderName} senilai Rp ${Number(transferAmount || order.grand_total).toLocaleString('id-ID')} masuk verifikasi admin`, senderName);
 
     // Notify Admin
     db.prepare(`

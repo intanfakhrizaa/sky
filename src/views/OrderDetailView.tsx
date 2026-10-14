@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle2, Clock, AlertCircle, QrCode, CreditCard, 
-  Upload, Printer, ArrowLeft, Truck, Package, ShieldCheck, Loader2 
+  Upload, Printer, ArrowLeft, Truck, Package, ShieldCheck, Loader2,
+  LogIn, LogOut, Calendar, Timer, History, UserCheck
 } from 'lucide-react';
 import { Order } from '../types/index.ts';
 import { useRealtime } from '../context/RealtimeContext.tsx';
+import { formatFullDateTime, formatShortDateTime, formatElapsedDuration } from '../utils/dateUtils.ts';
 
 interface OrderDetailViewProps {
   orderNumber: string;
@@ -73,7 +75,7 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        setUploadMessage('Bukti pembayaran berhasil diunggah! Admin sedang memverifikasi.');
+        setUploadMessage('Bukti pembayaran berhasil diunggah! Waktu pengunggahan dicatat dan admin sedang memverifikasi.');
         fetchOrder();
       } else {
         setUploadMessage(data.error || 'Gagal mengunggah bukti pembayaran');
@@ -107,17 +109,53 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-16 text-center space-y-3">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-600 mx-auto" />
-        <p className="text-xs text-slate-500 font-medium">Memuat data pesanan...</p>
+        <p className="text-xs text-slate-500 font-medium">Memuat data pesanan dan rincian waktu...</p>
       </div>
     );
   }
 
+  const incomingTime = order.incoming_at || order.created_at;
+  const paidTime = order.paid_at;
+  const processedTime = order.processed_at;
+  const shippedTime = order.shipped_at;
+  const deliveredTime = order.delivered_at;
+
   const steps = [
-    { key: 'PENDING_PAYMENT', label: 'Menunggu Pembayaran' },
-    { key: 'PAYMENT_VERIFICATION', label: 'Verifikasi Pembayaran' },
-    { key: 'PROCESSING', label: 'Diproses Gudang' },
-    { key: 'SHIPPED', label: 'Dalam Pengiriman' },
-    { key: 'COMPLETED', label: 'Selesai' },
+    { 
+      key: 'PENDING_PAYMENT', 
+      label: 'Pesanan Masuk',
+      subtext: formatShortDateTime(incomingTime),
+      exactTime: incomingTime,
+      icon: LogIn
+    },
+    { 
+      key: 'PAYMENT_VERIFICATION', 
+      label: 'Pembayaran',
+      subtext: paidTime ? formatShortDateTime(paidTime) : order.paymentProof ? 'Struk ditinjau' : 'Menunggu bayar',
+      exactTime: paidTime,
+      icon: CreditCard
+    },
+    { 
+      key: 'PROCESSING', 
+      label: 'Diproses Gudang',
+      subtext: processedTime ? formatShortDateTime(processedTime) : 'Antrian gudang',
+      exactTime: processedTime,
+      icon: Package
+    },
+    { 
+      key: 'SHIPPED', 
+      label: 'Pesanan Keluar (Kirim)',
+      subtext: shippedTime ? formatShortDateTime(shippedTime) : 'Siap keluar',
+      exactTime: shippedTime,
+      icon: LogOut
+    },
+    { 
+      key: 'COMPLETED', 
+      label: 'Selesai / Tiba',
+      subtext: deliveredTime ? formatShortDateTime(deliveredTime) : 'Menunggu tiba',
+      exactTime: deliveredTime,
+      icon: CheckCircle2
+    },
   ];
 
   const getStepStatus = (stepKey: string) => {
@@ -141,19 +179,19 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
             className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-cyan-700 transition-colors mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Kembali</span>
+            <span>Kembali ke Riwayat Pesanan</span>
           </button>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              Pesanan #{order.order_number}
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight font-mono">
+              #{order.order_number}
             </h1>
             <span
               className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
                 order.payment_status === 'PAID'
-                  ? 'bg-emerald-100 text-emerald-800'
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                   : order.payment_status === 'UNDER_REVIEW'
-                  ? 'bg-amber-100 text-amber-800'
-                  : 'bg-cyan-100 text-cyan-800'
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-cyan-100 text-cyan-800 border border-cyan-300'
               }`}
             >
               {order.payment_status === 'PAID'
@@ -162,59 +200,170 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
                 ? 'Sedang Ditinjau'
                 : 'Belum Dibayar'}
             </span>
+            <span className="px-2.5 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-wider">
+              {order.order_status}
+            </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">Dibuat pada: {order.created_at}</p>
+          <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+            <span>Dibuat: <strong className="text-slate-800">{formatFullDateTime(incomingTime)}</strong></span>
+            {shippedTime && (
+              <>
+                <span>•</span>
+                <span className="text-emerald-700 font-bold">Keluar Gudang: {formatFullDateTime(shippedTime)}</span>
+              </>
+            )}
+          </p>
         </div>
 
         <button
           onClick={() => window.print()}
-          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors self-start sm:self-auto"
+          className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors self-start sm:self-auto shadow-sm"
         >
-          <Printer className="w-4 h-4" />
-          <span>Cetak Bukti Faktur</span>
+          <Printer className="w-4 h-4 text-slate-600" />
+          <span>Cetak Bukti Faktur (Invoice)</span>
         </button>
+      </div>
+
+      {/* Key Lifecycle Timestamps Cards (Waktu Masuk, Waktu Keluar, Waktu Selesai) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Waktu Masuk */}
+        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-start gap-3">
+          <div className="p-2.5 bg-blue-50 text-blue-700 rounded-xl">
+            <LogIn className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+              Waktu Pesanan Masuk
+            </span>
+            <span className="font-mono font-bold text-slate-900 text-xs block mt-0.5">
+              {formatFullDateTime(incomingTime)}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              Dicatat saat checkout dibuat
+            </span>
+          </div>
+        </div>
+
+        {/* Waktu Keluar / Dikirim */}
+        <div className={`p-4 rounded-2xl border shadow-sm flex items-start gap-3 ${
+          shippedTime ? 'bg-emerald-50/60 border-emerald-300' : 'bg-white border-slate-200'
+        }`}>
+          <div className={`p-2.5 rounded-xl ${
+            shippedTime ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'
+          }`}>
+            <LogOut className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[10px] font-black uppercase tracking-wider block ${
+                shippedTime ? 'text-emerald-800' : 'text-slate-400'
+              }`}>
+                Waktu Pesanan Keluar
+              </span>
+              {shippedTime && (
+                <span className="text-[9px] bg-emerald-200 text-emerald-950 font-black px-1.5 py-0.2 rounded">
+                  DIKIRIM
+                </span>
+              )}
+            </div>
+            <span className="font-mono font-bold text-slate-900 text-xs block mt-0.5">
+              {shippedTime ? formatFullDateTime(shippedTime) : 'Belum Keluar dari Gudang'}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {shippedTime ? `Kurir: ${order.shipping_method}` : 'Dalam antrian packing gudang'}
+            </span>
+          </div>
+        </div>
+
+        {/* Durasi & Waktu Selesai */}
+        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-start gap-3">
+          <div className="p-2.5 bg-purple-50 text-purple-700 rounded-xl">
+            <Timer className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+              Total Durasi Proses
+            </span>
+            <span className="font-mono font-bold text-slate-900 text-xs block mt-0.5">
+              {formatElapsedDuration(incomingTime, deliveredTime || shippedTime)}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {deliveredTime ? `Selesai: ${formatFullDateTime(deliveredTime)}` : 'Pesanan masih aktif'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Real-time Order Tracking Timeline */}
       <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-          Pelacak Status Pesanan (Sinkronisasi Real-Time)
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Pelacak Status Pesanan &amp; Linimasa Jam
+          </h3>
+          <span className="text-[11px] text-cyan-700 font-bold bg-cyan-50 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-cyan-500 animate-ping" />
+            Sinkronisasi Otomatis
+          </span>
+        </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {steps.map((st, i) => {
             const status = getStepStatus(st.key);
+            const Icon = st.icon;
             return (
               <div
                 key={i}
-                className={`p-3 rounded-2xl border text-center transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   status === 'completed'
-                    ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold'
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold'
                     : 'border-slate-200 bg-slate-50 text-slate-400'
                 }`}
               >
-                <div className="flex justify-center mb-1">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className={`p-1.5 rounded-lg ${
+                    status === 'completed' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-400'
+                  }`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
                   {status === 'completed' ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   ) : (
-                    <Clock className="w-5 h-5 text-slate-300" />
+                    <Clock className="w-4 h-4 text-slate-300" />
                   )}
                 </div>
-                <p className="text-xs leading-tight">{st.label}</p>
+                <p className="text-xs font-bold leading-tight">{st.label}</p>
+                <p className="text-[10px] font-mono mt-1 opacity-90 truncate">
+                  {st.subtext}
+                </p>
+                {st.exactTime && (
+                  <p className="text-[9px] font-mono text-emerald-800 font-bold mt-0.5">
+                    {formatFullDateTime(st.exactTime).split(',')[1]}
+                  </p>
+                )}
               </div>
             );
           })}
         </div>
 
         {order.tracking_number && (
-          <div className="p-3.5 bg-sky-50 text-sky-900 rounded-2xl border border-sky-200 flex items-center gap-3 text-xs">
-            <Truck className="w-5 h-5 text-sky-600 flex-shrink-0" />
-            <div>
-              <p className="font-bold">Nomor Resi Pelayaran / Kurir:</p>
-              <p className="font-mono text-sm font-black text-sky-950 mt-0.5">
-                {order.tracking_number}
-              </p>
+          <div className="p-4 bg-sky-50 text-sky-950 rounded-2xl border border-sky-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-sky-600 text-white rounded-xl">
+                <Truck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-bold">Nomor Resi Pelayaran &amp; Kurir:</p>
+                <p className="font-mono text-sm font-black text-sky-950 mt-0.5">
+                  {order.tracking_number}
+                </p>
+              </div>
             </div>
+            {shippedTime && (
+              <div className="sm:text-right text-xs">
+                <span className="text-sky-700 block text-[10px] uppercase font-bold">Waktu Keluar Pengiriman:</span>
+                <span className="font-mono font-bold text-sky-900">{formatFullDateTime(shippedTime)}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -231,140 +380,221 @@ export function OrderDetailView({ orderNumber, onBack }: OrderDetailViewProps) {
                 Total Tagihan: Rp {order.grand_total.toLocaleString('id-ID')}
               </h3>
             </div>
-            <div className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold self-start">
-              Selesaikan sebelum 24 Jam
+            <div className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold self-start flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Batas Waktu: 24 Jam sejak {formatShortDateTime(incomingTime)}</span>
             </div>
           </div>
 
           {/* QRIS Display */}
           {order.payment_method === 'QRIS' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
-              <div className="flex flex-col items-center p-6 bg-white rounded-2xl text-slate-900 text-center space-y-3">
-                <div className="p-3 border-2 border-dashed border-slate-300 rounded-xl">
-                  {/* SVG QR Code Simulation */}
-                  <div className="w-44 h-44 bg-slate-900 flex items-center justify-center p-3 rounded-lg text-white">
-                    <QrCode className="w-36 h-36 text-white" />
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="space-y-3">
+                <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-2">
+                  <h4 className="font-bold text-sm text-cyan-300 flex items-center gap-2">
+                    <QrCode className="w-4 h-4" /> Scan Kode QRIS Nasional
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Buka GoPay, OVO, Dana, BCA Mobile, Livin Mandiri atau aplikasi e-wallet lainnya.
+                  </p>
                 </div>
-                <div className="text-xs">
-                  <span className="font-extrabold text-slate-900 block text-sm">QRIS RESMI SKYRA</span>
-                  <p className="text-slate-500 text-[11px] mt-0.5">NMID: ID1020038849204</p>
-                </div>
+                <button
+                  onClick={handleSimulatePayment}
+                  className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Simulasi Bayar QRIS Instan (Demo Mode)</span>
+                </button>
               </div>
 
-              <div className="space-y-4 text-xs text-slate-300">
-                <h4 className="font-bold text-white text-sm">Cara Pembayaran QRIS:</h4>
-                <ol className="list-decimal list-inside space-y-1.5 leading-relaxed">
-                  <li>Buka aplikasi BCA Mobile, GoPay, OVO, Livin, DANA, atau ShopeePay.</li>
-                  <li>Pilih menu <strong>Scan QR / Bayar</strong>.</li>
-                  <li>Scan kode QR di samping dan konfirmasi nominal Rp {order.grand_total.toLocaleString('id-ID')}.</li>
-                  <li>Status pesanan akan berubah otomatis menjadi <strong>Lunas</strong> dalam 5 detik.</li>
-                </ol>
-
-                <div className="pt-2">
-                  <button
-                    onClick={handleSimulatePayment}
-                    className="w-full py-3 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black rounded-xl text-xs shadow-md transition-colors"
-                  >
-                    Simulasi Pembayaran QRIS Berhasil (Tes Cepat)
-                  </button>
+              <div className="flex flex-col items-center justify-center p-6 bg-white rounded-2xl text-slate-950 text-center shadow-lg">
+                <div className="p-3 bg-slate-50 border-2 border-slate-900 rounded-xl mb-3">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                      order.payment?.qr_code_data || 'SKYRA_QRIS_DEFAULT'
+                    )}`}
+                    alt="QRIS Code"
+                    className="w-40 h-40"
+                  />
                 </div>
+                <span className="text-[10px] uppercase font-bold text-slate-400">NMID: ID102938472910</span>
+                <span className="text-xs font-black text-slate-900 mt-0.5">SKYRA MARINE INDONESIA</span>
               </div>
             </div>
           )}
 
-          {/* Bank Transfer Manual & Upload Bukti */}
+          {/* Manual Bank Transfer Form */}
           {order.payment_method === 'BANK_TRANSFER_MANUAL' && (
-            <div className="space-y-6">
-              <div className="p-4 bg-slate-800/80 rounded-2xl border border-slate-700 text-xs space-y-2">
-                <p className="font-bold text-white text-sm">Rekening Resmi SKYRA Marine:</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                  <div className="p-3 bg-slate-900 rounded-xl border border-slate-700">
-                    <span className="text-slate-400 block text-[11px]">Bank Mandiri</span>
-                    <strong className="text-sm font-mono text-cyan-300">137-00-9876543-2</strong>
-                    <span className="text-slate-400 block text-[10px]">a.n. PT SKYRA SAMUDERA INDONESIA</span>
+            <div className="space-y-4">
+              <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-2 text-xs">
+                <h4 className="font-bold text-sm text-cyan-300 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4" /> Rekening Pembayaran Resmi SKYRA:
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+                    <p className="text-slate-400 text-[10px]">Bank Central Asia (BCA)</p>
+                    <p className="font-mono text-base font-bold text-white">8830-1928-44</p>
+                    <p className="text-slate-400 text-[10px]">a.n PT SKYRA MARINE INDONESIA</p>
                   </div>
-                  <div className="p-3 bg-slate-900 rounded-xl border border-slate-700">
-                    <span className="text-slate-400 block text-[11px]">Bank BCA</span>
-                    <strong className="text-sm font-mono text-cyan-300">828-0918-223</strong>
-                    <span className="text-slate-400 block text-[10px]">a.n. PT SKYRA SAMUDERA INDONESIA</span>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+                    <p className="text-slate-400 text-[10px]">Bank Mandiri</p>
+                    <p className="font-mono text-base font-bold text-white">137-00-9988-223</p>
+                    <p className="text-slate-400 text-[10px]">a.n PT SKYRA MARINE INDONESIA</p>
                   </div>
                 </div>
               </div>
 
-              {/* Upload Proof Form */}
-              <form onSubmit={handleUploadProof} className="p-5 bg-slate-800/50 rounded-2xl border border-slate-700 space-y-4">
-                <h4 className="font-bold text-white text-xs uppercase tracking-wider flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-cyan-400" />
-                  Unggah Bukti Transfer Bank
+              {/* Upload Form */}
+              <form onSubmit={handleUploadProof} className="p-5 bg-white/5 border border-white/10 rounded-2xl space-y-3">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-cyan-400">
+                  Konfirmasi / Unggah Bukti Transfer
                 </h4>
 
                 {uploadMessage && (
-                  <div className="p-3 bg-cyan-950 text-cyan-200 text-xs rounded-xl border border-cyan-800">
+                  <div className="p-3 bg-cyan-950/80 border border-cyan-500/50 rounded-xl text-xs text-cyan-200">
                     {uploadMessage}
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Nama Bank Pengirim</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Cth: BCA / Mandiri / BNI"
-                      value={bankSender}
-                      onChange={(e) => setBankSender(e.target.value)}
-                      className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white outline-none focus:border-cyan-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-slate-400 block mb-1">Nama Pemilik Rekening Pengirim</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Nama di buku tabungan/struk"
-                      value={senderName}
-                      onChange={(e) => setSenderName(e.target.value)}
-                      className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white outline-none focus:border-cyan-400"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="text-slate-400 block mb-1">URL Bukti / Gambar Struk</label>
-                    <input
-                      type="text"
-                      required
-                      value={proofImage}
-                      onChange={(e) => setProofImage(e.target.value)}
-                      className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs outline-none focus:border-cyan-400"
-                    />
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Bank Anda (contoh: BCA)"
+                    value={bankSender}
+                    onChange={(e) => setBankSender(e.target.value)}
+                    required
+                    className="p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white outline-none focus:border-cyan-400"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nama Pengirim Sesuai Rekening"
+                    value={senderName}
+                    onChange={(e) => setSenderName(e.target.value)}
+                    required
+                    className="p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white outline-none focus:border-cyan-400"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Nominal Transfer"
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(e.target.value)}
+                    required
+                    className="p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white outline-none focus:border-cyan-400"
+                  />
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={isUploading}
-                  className="px-6 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50"
-                >
-                  {isUploading ? 'Mengunggah...' : 'Kirim Bukti Pembayaran ke Admin'}
-                </button>
+                <div className="flex items-center gap-3 pt-2">
+                  <input
+                    type="text"
+                    placeholder="URL Bukti Foto Struk"
+                    value={proofImage}
+                    onChange={(e) => setProofImage(e.target.value)}
+                    className="flex-1 p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isUploading}
+                    className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{isUploading ? 'Mengunggah...' : 'Kirim Bukti Bayar'}</span>
+                  </button>
+                </div>
               </form>
             </div>
           )}
         </div>
       )}
 
-      {/* Order Items & Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Audit Log & Timestamp History Table */}
+      <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-slate-100 text-slate-700 rounded-xl">
+              <History className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-black text-slate-900 text-sm">
+                Riwayat Waktu &amp; Jejak Status Pesanan (Audit Timestamp Log)
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Pencatatan waktu akurat detik per detik saat pesanan masuk, diverifikasi, keluar gudang, hingga tiba
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {order.status_history && order.status_history.length > 0 ? (
+          <div className="divide-y divide-slate-100 text-xs">
+            {order.status_history.map((hist, idx) => (
+              <div key={idx} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-50/70 p-2 rounded-xl transition-colors">
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${
+                    hist.event_type === 'PESANAN_MASUK'
+                      ? 'bg-blue-100 text-blue-800'
+                      : hist.event_type === 'PESANAN_KELUAR'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : hist.event_type === 'PESANAN_SELESAI'
+                      ? 'bg-purple-100 text-purple-800'
+                      : hist.event_type === 'PEMBAYARAN_DITERIMA'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-100 text-amber-900'
+                  }`}>
+                    {hist.event_type === 'PESANAN_MASUK' ? (
+                      <LogIn className="w-3.5 h-3.5" />
+                    ) : hist.event_type === 'PESANAN_KELUAR' ? (
+                      <LogOut className="w-3.5 h-3.5" />
+                    ) : hist.event_type === 'PESANAN_SELESAI' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Clock className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <strong className="text-slate-900 font-bold">{hist.title}</strong>
+                      <span className="px-2 py-0.2 rounded bg-slate-100 text-slate-600 text-[10px] font-mono">
+                        {hist.status}
+                      </span>
+                    </div>
+                    {hist.description && (
+                      <p className="text-slate-600 text-[11px] mt-0.5">{hist.description}</p>
+                    )}
+                    <span className="text-[10px] text-slate-400 mt-0.5 block flex items-center gap-1">
+                      <UserCheck className="w-3 h-3" /> Pelaksana: {hist.actor || 'Sistem SKYRA'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right sm:self-center flex-shrink-0">
+                  <span className="font-mono font-bold text-slate-800 text-[11px] block bg-slate-100 px-2.5 py-1 rounded-lg">
+                    {formatFullDateTime(hist.timestamp)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-4 text-center text-xs text-slate-400">
+            Waktu masuk: {formatFullDateTime(incomingTime)}
+          </div>
+        )}
+      </div>
+
+      {/* Items & Shipping Summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Ordered Items List */}
         <div className="lg:col-span-8 p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
           <h3 className="font-extrabold text-slate-900 text-sm border-b border-slate-100 pb-3">
-            Daftar Barang Dipesan
+            Item Produk dalam Pesanan
           </h3>
 
           <div className="space-y-3">
             {order.items?.map((it) => (
-              <div key={it.id} className="flex items-center gap-4 py-2 border-b border-slate-100 last:border-0">
+              <div
+                key={it.id}
+                className="flex items-center gap-4 p-3 rounded-2xl bg-slate-50 border border-slate-100"
+              >
                 <img
                   src={it.image_url || 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=200'}
                   alt=""

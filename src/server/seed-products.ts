@@ -40,7 +40,7 @@ interface RawProduct {
 
 export function seedProducts() {
   const existing = db.prepare('SELECT COUNT(*) as count FROM products').get() as { count: number };
-  if (existing.count >= 40) return;
+  if (existing.count > 0) return;
 
   const rawProducts: RawProduct[] = [
     // --- 1. SURFING (cat_id: 1) ---

@@ -241,12 +241,28 @@ export function Navbar({ onSearch, onOpenVisualSearch, onNavigate, currentView }
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(false);
+                        onNavigate('wishlist');
+                      }}
+                      className="w-full text-left px-4 py-2 hover:bg-slate-700 text-xs flex items-center gap-2 text-slate-300"
+                    >
+                      <Heart className="w-4 h-4 text-rose-400" />
+                      <span>Wishlist Favorit</span>
+                      {wishlistCount > 0 && (
+                        <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded-full font-bold">
+                          {wishlistCount}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
                         onNavigate('orders');
                       }}
                       className="w-full text-left px-4 py-2 hover:bg-slate-700 text-xs flex items-center gap-2 text-slate-300"
                     >
                       <Package className="w-4 h-4 text-slate-400" />
-                      Pesanan Saya
+                      Pesanan &amp; Antrian
                     </button>
 
                     <button

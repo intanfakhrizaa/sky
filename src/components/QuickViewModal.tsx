@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, ShoppingBag, Plus, Minus, Layers, AlertCircle, Sparkles } from 'lucide-react';
+import { X, Check, ShoppingBag, Plus, Minus, Layers, AlertCircle, Sparkles, Heart } from 'lucide-react';
 import { Product, ProductVariant } from '../types/index.ts';
 import { useCart } from '../context/CartContext.tsx';
 
@@ -11,7 +11,7 @@ interface QuickViewModalProps {
 }
 
 export function QuickViewModal({ product, isOpen, onClose, onGoToCart }: QuickViewModalProps) {
-  const { addToCart } = useCart();
+  const { addToCart, wishlistIds, toggleWishlist } = useCart();
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
@@ -268,19 +268,39 @@ export function QuickViewModal({ product, isOpen, onClose, onGoToCart }: QuickVi
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-12 gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await toggleWishlist(fullProduct.id);
+                    if (res.requiresAuth) {
+                      setNotification('Silakan login untuk menyimpan produk ke Wishlist');
+                      setTimeout(() => setNotification(null), 3000);
+                    }
+                  }}
+                  className={`col-span-3 py-3 px-2 rounded-xl border flex items-center justify-center gap-1 text-xs font-bold transition-all ${
+                    wishlistIds.has(fullProduct.id)
+                      ? 'border-rose-400 bg-rose-50 text-rose-600'
+                      : 'border-slate-300 hover:border-slate-400 text-slate-700 bg-white'
+                  }`}
+                  title={wishlistIds.has(fullProduct.id) ? 'Hapus dari Wishlist' : 'Simpan ke Wishlist'}
+                >
+                  <Heart className={`w-4 h-4 ${wishlistIds.has(fullProduct.id) ? 'fill-current text-rose-600' : ''}`} />
+                  <span className="hidden sm:inline">{wishlistIds.has(fullProduct.id) ? 'Favorit' : 'Wishlist'}</span>
+                </button>
+
                 <button
                   onClick={() => handleAdd(false)}
                   disabled={isOutOfStock || isAdding}
-                  className="py-3 px-4 rounded-xl border border-cyan-700 text-cyan-800 hover:bg-cyan-50 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="col-span-4 py-3 px-2 rounded-xl border border-cyan-700 text-cyan-800 hover:bg-cyan-50 font-bold text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                 >
-                  <ShoppingBag className="w-4 h-4" />
-                  + Keranjang
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>+ Keranjang</span>
                 </button>
                 <button
                   onClick={() => handleAdd(true)}
                   disabled={isOutOfStock || isAdding}
-                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-sky-700 hover:from-cyan-700 hover:to-sky-800 text-white font-bold text-xs shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  className="col-span-5 py-3 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-sky-700 hover:from-cyan-700 hover:to-sky-800 text-white font-bold text-xs shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
                   Beli Sekarang
                 </button>

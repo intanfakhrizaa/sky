@@ -340,6 +340,34 @@ export function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 20. Loyalty Points History
+    CREATE TABLE IF NOT EXISTS loyalty_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      points INTEGER NOT NULL,
+      balance_after INTEGER NOT NULL,
+      action_type TEXT NOT NULL, -- 'PURCHASE_REWARD', 'REGISTRATION_BONUS', 'TIER_UPGRADE', 'REDEMPTION'
+      description TEXT NOT NULL,
+      order_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- 21. Order Status History & Timestamps (Pesanan Masuk, Proses, Keluar/Dikirim, Selesai)
+    CREATE TABLE IF NOT EXISTS order_status_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      order_number TEXT NOT NULL,
+      status TEXT NOT NULL,
+      event_type TEXT NOT NULL, -- 'PESANAN_MASUK', 'PEMBAYARAN_DITERIMA', 'PROSES_GUDANG', 'PESANAN_KELUAR', 'PESANAN_SELESAI', 'PESANAN_DIBATALKAN'
+      title TEXT NOT NULL,
+      description TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      actor TEXT DEFAULT 'Sistem',
+      FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+    );
+
     -- Performance Indexes
     CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
     CREATE INDEX IF NOT EXISTS idx_products_subcategory ON products(subcategory_id);
@@ -352,5 +380,27 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number);
     CREATE INDEX IF NOT EXISTS idx_cart_items_cart ON cart_items(cart_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+    CREATE INDEX IF NOT EXISTS idx_loyalty_user ON loyalty_history(user_id);
+    CREATE INDEX IF NOT EXISTS idx_order_history_order ON order_status_history(order_id);
   `);
+
+  // Safe columns migration for users
+  try { db.exec("ALTER TABLE users ADD COLUMN loyalty_points INTEGER DEFAULT 0;"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN membership_tier TEXT DEFAULT 'standard';"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN member_number TEXT;"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN member_joined_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN member_discount_percent INTEGER DEFAULT 0;"); } catch {}
+
+  // Safe columns migration for orders (exact incoming, processing, outgoing, and completion timestamps)
+  try { db.exec("ALTER TABLE orders ADD COLUMN incoming_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN paid_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN processed_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN shipped_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN delivered_at DATETIME;"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN cancelled_at DATETIME;"); } catch {}
+
+  // Backfill incoming_at with created_at if missing
+  try {
+    db.exec("UPDATE orders SET incoming_at = created_at WHERE incoming_at IS NULL;");
+  } catch {}
 }

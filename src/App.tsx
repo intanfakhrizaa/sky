@@ -16,6 +16,7 @@ import { CheckoutView } from './views/CheckoutView.tsx';
 import { OrderDetailView } from './views/OrderDetailView.tsx';
 import { OrdersListView } from './views/OrdersListView.tsx';
 import { ProfileView } from './views/ProfileView.tsx';
+import { WishlistView } from './views/WishlistView.tsx';
 import { LoginView } from './views/LoginView.tsx';
 import { AdminView } from './views/AdminView.tsx';
 
@@ -135,7 +136,15 @@ function MainApp() {
               />
             )}
 
-            {currentView === 'profile' && <ProfileView />}
+            {currentView === 'wishlist' && (
+              <WishlistView
+                onNavigate={handleNavigate}
+                onSelectProduct={handleSelectProduct}
+                onOpenQuickView={(p) => setQuickViewProduct(p)}
+              />
+            )}
+
+            {currentView === 'profile' && <ProfileView onNavigate={handleNavigate} />}
 
             {currentView === 'login' && (
               <LoginView onSuccess={() => setCurrentView('home')} />

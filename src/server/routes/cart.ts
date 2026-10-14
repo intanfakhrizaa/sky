@@ -171,11 +171,14 @@ cartRouter.get('/wishlist', (req: Request, res: Response) => {
 
   const items = db.prepare(`
     SELECT w.id, w.product_id, w.created_at,
-           p.name, p.slug, p.normal_price, p.promo_price, p.rating, p.sold_count,
+           p.name, p.slug, p.sku, p.normal_price, p.promo_price, p.rating, p.sold_count,
+           b.name as brand_name, c.name as category_name,
            (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as image_url,
            (SELECT SUM(available_stock) FROM product_variants WHERE product_id = p.id) as total_stock
     FROM wishlists w
     JOIN products p ON w.product_id = p.id
+    LEFT JOIN brands b ON p.brand_id = b.id
+    LEFT JOIN categories c ON p.category_id = c.id
     WHERE w.user_id = ?
     ORDER BY w.id DESC
   `).all(user.id);
@@ -185,7 +188,7 @@ cartRouter.get('/wishlist', (req: Request, res: Response) => {
 
 cartRouter.post('/wishlist/:productId', (req: Request, res: Response) => {
   const user = getUserFromToken(req);
-  if (!user) return res.status(401).json({ error: 'Harap login untuk menyimpan wishlist' });
+  if (!user) return res.status(401).json({ error: 'Harap login untuk menyimpan ke wishlist' });
 
   const productId = Number(req.params.productId);
   const existing = db.prepare('SELECT id FROM wishlists WHERE user_id = ? AND product_id = ?').get(user.id, productId);
@@ -197,4 +200,13 @@ cartRouter.post('/wishlist/:productId', (req: Request, res: Response) => {
     db.prepare('INSERT INTO wishlists (user_id, product_id) VALUES (?, ?)').run(user.id, productId);
     res.json({ inWishlist: true, message: 'Ditambahkan ke wishlist' });
   }
+});
+
+cartRouter.delete('/wishlist/:productId', (req: Request, res: Response) => {
+  const user = getUserFromToken(req);
+  if (!user) return res.status(401).json({ error: 'Harap login' });
+
+  const productId = Number(req.params.productId);
+  db.prepare('DELETE FROM wishlists WHERE user_id = ? AND product_id = ?').run(user.id, productId);
+  res.json({ inWishlist: false, message: 'Berhasil dihapus dari wishlist' });
 });

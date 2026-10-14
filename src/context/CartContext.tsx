@@ -14,6 +14,7 @@ interface CartContextType {
   items: CartItem[];
   summary: CartSummary;
   wishlistCount: number;
+  wishlistItems: any[];
   isLoading: boolean;
   addToCart: (productId: number, variantId: number, quantity?: number) => Promise<{ success: boolean; error?: string }>;
   updateQuantity: (itemId: number, quantity: number) => Promise<void>;
@@ -23,7 +24,8 @@ interface CartContextType {
   refreshCart: () => Promise<void>;
   refreshWishlist: () => Promise<void>;
   wishlistIds: Set<number>;
-  toggleWishlist: (productId: number) => Promise<boolean>;
+  toggleWishlist: (productId: number) => Promise<{ success: boolean; inWishlist: boolean; requiresAuth?: boolean }>;
+  removeFromWishlist: (productId: number) => Promise<void>;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -43,6 +45,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const { lastEvent } = useRealtime();
 
   const [items, setItems] = useState<CartItem[]>([]);
+  const [wishlistItems, setWishlistItems] = useState<any[]>([]);
   const [summary, setSummary] = useState<CartSummary>({
     subtotal: 0,
     totalWholesaleSavings: 0,
@@ -81,6 +84,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!token) {
       setWishlistCount(0);
       setWishlistIds(new Set());
+      setWishlistItems([]);
       return;
     }
     try {
@@ -90,6 +94,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const list = data.wishlist || [];
         setWishlistCount(list.length);
         setWishlistIds(new Set(list.map((item: any) => item.product_id)));
+        setWishlistItems(list);
       }
     } catch (err) {
       console.error('Failed to load wishlist', err);
@@ -157,7 +162,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const selectAll = async (select: boolean) => {
     try {
-      await fetch('/api/cart/select-all', {
+      await fetch(`/api/cart/select-all`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify({ select })
@@ -180,8 +185,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const toggleWishlist = async (productId: number) => {
-    if (!token) return false;
+  const toggleWishlist = async (productId: number): Promise<{ success: boolean; inWishlist: boolean; requiresAuth?: boolean }> => {
+    if (!token) {
+      return { success: false, inWishlist: false, requiresAuth: true };
+    }
     try {
       const res = await fetch(`/api/wishlist/${productId}`, {
         method: 'POST',
@@ -189,9 +196,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       });
       const data = await res.json();
       await refreshWishlist();
-      return data.inWishlist;
+      return { success: true, inWishlist: !!data.inWishlist };
     } catch {
-      return false;
+      return { success: false, inWishlist: false };
+    }
+  };
+
+  const removeFromWishlist = async (productId: number) => {
+    if (!token) return;
+    try {
+      await fetch(`/api/wishlist/${productId}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
+      await refreshWishlist();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -200,6 +220,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       items,
       summary,
       wishlistCount,
+      wishlistItems,
       isLoading,
       addToCart,
       updateQuantity,
@@ -209,7 +230,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       refreshCart,
       refreshWishlist,
       wishlistIds,
-      toggleWishlist
+      toggleWishlist,
+      removeFromWishlist
     }}>
       {children}
     </CartContext.Provider>

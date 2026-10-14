@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { User, MapPin, Phone, Mail, Plus, Check, Shield } from 'lucide-react';
+import { User, MapPin, Phone, Mail, Plus, Check, Shield, Heart, Package, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { Address } from '../types/index.ts';
 
-export function ProfileView() {
+interface ProfileViewProps {
+  onNavigate?: (view: string) => void;
+}
+
+export function ProfileView({ onNavigate }: ProfileViewProps) {
   const { user, refreshUser } = useAuth();
   const [addresses, setAddresses] = useState<Address[]>([]);
 
@@ -153,6 +157,35 @@ export function ProfileView() {
               {isUpdating ? 'Menyimpan...' : 'Simpan Profil'}
             </button>
           </form>
+
+          {onNavigate && (
+            <div className="pt-4 border-t border-slate-100 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Akses Cepat:</p>
+              <button
+                type="button"
+                onClick={() => onNavigate('wishlist')}
+                className="w-full p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100/80 text-rose-700 text-xs font-bold flex items-center justify-between transition-colors border border-rose-200"
+              >
+                <div className="flex items-center gap-2">
+                  <Heart className="w-4 h-4 text-rose-600 fill-current" />
+                  <span>Wishlist Favorit Saya</span>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-rose-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('orders')}
+                className="w-full p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-between transition-colors border border-slate-200"
+              >
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-slate-600" />
+                  <span>Pesanan &amp; Daftar Tunggu Transaksi</span>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Address Book Card */}

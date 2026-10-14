@@ -167,6 +167,25 @@ export function ProductDetailView({ slug, onBack, onSelectProduct, onOpenQuickVi
                 Flash Sale
               </span>
             )}
+            {/* Floating Wishlist Button */}
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await toggleWishlist(product.id);
+                if (res.requiresAuth) {
+                  setNotification('Silakan login untuk menyimpan produk ke Wishlist');
+                  setTimeout(() => setNotification(null), 3000);
+                }
+              }}
+              className={`absolute top-4 right-4 p-2.5 rounded-full backdrop-blur-md shadow-lg transition-transform hover:scale-110 z-10 ${
+                isWishlisted
+                  ? 'bg-rose-50 text-rose-600 ring-2 ring-rose-300'
+                  : 'bg-white/90 text-slate-600 hover:text-rose-600 hover:bg-white'
+              }`}
+              title={isWishlisted ? 'Hapus dari Wishlist' : 'Simpan ke Wishlist'}
+            >
+              <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-current text-rose-600' : ''}`} />
+            </button>
           </div>
 
           {/* Thumbnails */}
@@ -392,15 +411,28 @@ export function ProductDetailView({ slug, onBack, onSelectProduct, onOpenQuickVi
             {/* Wishlist and Share */}
             <div className="flex items-center gap-3 pt-2">
               <button
-                onClick={() => toggleWishlist(product.id)}
-                className={`flex-1 py-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                type="button"
+                onClick={async () => {
+                  const res = await toggleWishlist(product.id);
+                  if (res.requiresAuth) {
+                    setNotification('Silakan login untuk menyimpan produk ke Wishlist');
+                    setTimeout(() => setNotification(null), 3000);
+                  } else if (res.inWishlist) {
+                    setNotification('Produk berhasil disimpan ke Wishlist Favorit!');
+                    setTimeout(() => setNotification(null), 2500);
+                  } else {
+                    setNotification('Produk dihapus dari Wishlist');
+                    setTimeout(() => setNotification(null), 2500);
+                  }
+                }}
+                className={`flex-1 py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                   isWishlisted
-                    ? 'border-rose-300 bg-rose-50 text-rose-600'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'border-rose-400 bg-rose-50 text-rose-600 shadow-sm'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-current' : ''}`} />
-                {isWishlisted ? 'Tersimpan di Wishlist' : 'Tambah ke Wishlist'}
+                <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-current text-rose-600' : ''}`} />
+                <span>{isWishlisted ? 'Tersimpan di Wishlist (Klik untuk Hapus)' : 'Simpan ke Wishlist Favorit'}</span>
               </button>
             </div>
           </div>

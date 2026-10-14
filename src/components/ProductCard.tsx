@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Star, Heart, ShoppingBag, Layers, AlertTriangle } from 'lucide-react';
 import { Product } from '../types/index.ts';
 import { useCart } from '../context/CartContext.tsx';
@@ -11,6 +11,7 @@ interface ProductCardProps {
 
 export function ProductCard({ product, onOpenQuickView, onSelectProduct }: ProductCardProps) {
   const { wishlistIds, toggleWishlist } = useCart();
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const isWishlisted = wishlistIds.has(product.id);
 
   const hasDiscount = product.promo_price && product.promo_price < product.normal_price;
@@ -59,19 +60,37 @@ export function ProductCard({ product, onOpenQuickView, onSelectProduct }: Produ
 
         {/* Wishlist Button */}
         <button
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation();
-            toggleWishlist(product.id);
+            const res = await toggleWishlist(product.id);
+            if (res.requiresAuth) {
+              setToastMsg('Harap login dahulu');
+              setTimeout(() => setToastMsg(null), 2500);
+            } else if (res.inWishlist) {
+              setToastMsg('Tersimpan di Wishlist');
+              setTimeout(() => setToastMsg(null), 2000);
+            } else {
+              setToastMsg('Dihapus dari Wishlist');
+              setTimeout(() => setToastMsg(null), 2000);
+            }
           }}
-          className={`absolute top-2.5 right-2.5 p-2 rounded-full backdrop-blur-md transition-all shadow-sm ${
+          className={`absolute top-2.5 right-2.5 p-2 rounded-full backdrop-blur-md transition-all shadow-md z-10 ${
             isWishlisted
-              ? 'bg-rose-50 text-rose-600'
-              : 'bg-white/80 text-slate-600 hover:text-rose-600 hover:bg-white'
+              ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-300'
+              : 'bg-white/90 text-slate-600 hover:text-rose-600 hover:bg-white'
           }`}
+          title={isWishlisted ? 'Hapus dari Wishlist' : 'Simpan ke Wishlist'}
           aria-label="Wishlist"
         >
-          <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-current' : ''}`} />
+          <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-current text-rose-600' : ''}`} />
         </button>
+
+        {/* Floating feedback toast */}
+        {toastMsg && (
+          <div className="absolute top-12 right-2.5 z-20 px-2.5 py-1 bg-slate-900/95 text-white text-[10px] font-bold rounded-lg shadow-lg pointer-events-none border border-slate-700 animate-in fade-in duration-150">
+            {toastMsg}
+          </div>
+        )}
 
         {/* Quick View Hover Action */}
         <div className="absolute inset-x-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
